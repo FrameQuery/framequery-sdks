@@ -60,6 +60,18 @@ func (j *Job) IsFailed() bool {
 	return j.Status == "FAILED"
 }
 
+// Result parses processedData from a completed job.
+// Returns nil, false if the job isn't complete or has no processed data.
+func (j *Job) Result() (*ProcessingResult, bool) {
+	if !j.IsComplete() {
+		return nil, false
+	}
+	if _, ok := j.Raw["processedData"]; !ok {
+		return nil, false
+	}
+	return parseResult(j.Raw), true
+}
+
 // Quota holds the account's plan, included hours, credit balance, and reset date.
 type Quota struct {
 	Plan                string  `json:"plan"`

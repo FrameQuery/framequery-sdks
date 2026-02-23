@@ -51,6 +51,9 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("Job status: %s\n", job.Status)
+	if result, ok := job.Result(); ok {
+		fmt.Printf("Duration: %.1fs, %d scenes\n", result.Duration, len(result.Scenes))
+	}
 
 	// 4. Check quota
 	quota, err := client.GetQuota(ctx)

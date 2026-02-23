@@ -24,8 +24,12 @@ def main() -> None:
     job = fq.upload("video.mp4")
     print(f"Job created: {job.id} (status: {job.status})")
 
+    # -- Check result via get_job --
     job = fq.get_job(job.id)
     print(f"Job status: {job.status}")
+    if job.is_complete:
+        print(f"Scenes: {len(job.result.scenes)}")
+        print(f"Transcript: {len(job.result.transcript)} segments")
 
     # -- Progress callback --
     def on_progress(job):

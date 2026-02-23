@@ -241,4 +241,4 @@ def _backoff_delay(attempt: int, response: Optional[httpx.Response] = None) -> f
                 return float(ra)
             except ValueError:
                 pass
-    return min(0.5 * (2**attempt), 30.0)
+    return float(min(0.5 * (2**attempt), 30.0))

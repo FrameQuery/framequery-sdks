@@ -64,6 +64,13 @@ module FrameQuery
     def failed?
       @status == "FAILED"
     end
+
+    # Parses processedData from the raw response. Returns nil unless complete.
+    def result
+      return nil unless complete?
+
+      Parsers.parse_result(@raw)
+    end
   end
 
   class Quota

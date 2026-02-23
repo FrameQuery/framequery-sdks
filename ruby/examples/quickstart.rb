@@ -17,9 +17,13 @@ end
 # From URL
 result = client.process_url("https://cdn.example.com/video.mp4")
 
-# Upload without waiting
+# Upload without waiting, then fetch later
 job = client.upload("video.mp4")
 job = client.get_job(job.id)
+if job.complete?
+  r = job.result
+  puts "#{r.duration}s, #{r.scenes.length} scenes, #{r.transcript.length} transcript segments"
+end
 
 # Progress tracking
 result = client.process("video.mp4") do |job|

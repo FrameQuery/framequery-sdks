@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import time
-from io import IOBase
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Dict, Optional, Union
 
@@ -17,7 +16,7 @@ from ._constants import (
     DEFAULT_TIMEOUT,
     USER_AGENT,
 )
-from ._errors import FrameQueryError, JobFailedError, RateLimitError
+from ._errors import FrameQueryError, JobFailedError
 from ._models import (
     Job,
     JobPage,
@@ -195,9 +194,11 @@ class FrameQuery:
         raise FrameQueryError("Request failed")  # unreachable
 
     def _upload_to_signed_url(self, url: str, file_data: Any) -> None:
+        raw = file_data if isinstance(file_data, (bytes, bytearray)) else file_data.read()
+        content: bytes = bytes(raw) if not isinstance(raw, bytes) else raw
         resp = self._client.put(
             url,
-            content=file_data if isinstance(file_data, (bytes, bytearray)) else file_data,
+            content=content,
             headers={"Content-Type": "application/octet-stream"},
         )
         if not resp.is_success:
@@ -251,4 +252,4 @@ def _backoff_delay(attempt: int, response: Optional[httpx.Response] = None) -> f
                 return float(ra)
             except ValueError:
                 pass
-    return min(0.5 * (2**attempt), 30.0)
+    return float(min(0.5 * (2**attempt), 30.0))

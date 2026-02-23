@@ -59,6 +59,13 @@ class Job:
     def is_failed(self) -> bool:
         return self.status == "FAILED"
 
+    @property
+    def result(self) -> Optional["ProcessingResult"]:
+        """Parsed processing result, or None if the job hasn't completed."""
+        if not self.is_complete:
+            return None
+        return _parse_result(self.raw)
+
 
 @dataclass(frozen=True)
 class Quota:

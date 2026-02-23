@@ -31,6 +31,8 @@ export interface Job {
   isTerminal: boolean;
   isComplete: boolean;
   isFailed: boolean;
+  /** Parsed processing result, available when the job is complete. */
+  result: ProcessingResult | null;
 }
 
 export interface Quota {
@@ -77,6 +79,8 @@ export interface ListJobsOptions {
 
 export function parseJob(data: Record<string, unknown>): Job {
   const status = String(data.status ?? "");
+  const isComplete = status === "COMPLETED" || status === "COMPLETED_NO_SCENES";
+  const hasResult = isComplete && data.processedData != null;
   return {
     id: String(data.jobId ?? ""),
     status,
@@ -86,9 +90,10 @@ export function parseJob(data: Record<string, unknown>): Job {
       ? data.estimatedCompletionTimeSeconds
       : undefined,
     raw: data,
-    isTerminal: status === "COMPLETED" || status === "COMPLETED_NO_SCENES" || status === "FAILED",
-    isComplete: status === "COMPLETED" || status === "COMPLETED_NO_SCENES",
+    isTerminal: isComplete || status === "FAILED",
+    isComplete,
     isFailed: status === "FAILED",
+    result: hasResult ? parseResult(data) : null,
   };
 }
 

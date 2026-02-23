@@ -74,6 +74,16 @@ impl Job {
     pub fn is_failed(&self) -> bool {
         self.status == "FAILED"
     }
+
+    /// Parse `processedData` from the raw response into a [`ProcessingResult`].
+    /// Returns `None` if the job isn't complete or has no processed data.
+    pub fn result(&self) -> Option<ProcessingResult> {
+        if !self.is_complete() {
+            return None;
+        }
+        self.raw.get("processedData")?;
+        Some(processing_result_from_value(self.raw.clone()))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -115,6 +125,7 @@ pub struct ProcessOptions {
     /// Default: 24h.
     pub timeout: std::time::Duration,
     /// Called on each poll iteration with the current `Job`.
+    #[allow(clippy::type_complexity)]
     pub on_progress: Option<Box<dyn Fn(&Job) + Send>>,
 }
 

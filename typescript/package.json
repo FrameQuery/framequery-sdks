@@ -45,6 +45,7 @@
     "node": ">=18"
   },
   "devDependencies": {
+    "@types/node": "^25.3.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vitest": "^2.0.0"

@@ -120,7 +120,7 @@ export class FrameQuery {
 
     const uploadResp = await this.fetchImpl(uploadUrl, {
       method: "PUT",
-      body: fileContent,
+      body: fileContent as BodyInit,
       headers: { "Content-Type": "application/octet-stream" },
       signal: options?.signal,
     });

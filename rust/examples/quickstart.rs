@@ -69,7 +69,11 @@ async fn main() -> framequery::Result<()> {
         .process_url("https://example.com/sample.mp4", Some(opts))
         .await?;
 
-    println!("URL job {} completed with {} scenes.", result.job_id, result.scenes.len());
+    println!(
+        "URL job {} completed with {} scenes.",
+        result.job_id,
+        result.scenes.len()
+    );
     println!();
 
     // -----------------------------------------------------------------------
@@ -82,7 +86,19 @@ async fn main() -> framequery::Result<()> {
     let job = client.get_job(&job.id).await?;
     println!("Current status: {}", job.status);
     if job.is_terminal() {
-        println!("Job is done (complete={}, failed={})", job.is_complete(), job.is_failed());
+        println!(
+            "Job is done (complete={}, failed={})",
+            job.is_complete(),
+            job.is_failed()
+        );
+    }
+    // If complete, parse the processing result directly from the job:
+    if let Some(result) = job.result() {
+        println!(
+            "Duration: {:.1}s, {} scenes",
+            result.duration,
+            result.scenes.len()
+        );
     }
     println!();
 

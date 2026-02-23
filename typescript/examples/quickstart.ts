@@ -24,6 +24,10 @@ async function main() {
 
   const checked = await fq.getJob(job.id);
   console.log(`Job status: ${checked.status}`);
+  if (checked.isComplete && checked.result) {
+    console.log(`Scenes: ${checked.result.scenes.length}`);
+    console.log(`Transcript segments: ${checked.result.transcript.length}`);
+  }
 
   // 4. Progress tracking
   const tracked = await fq.process("./video.mp4", {

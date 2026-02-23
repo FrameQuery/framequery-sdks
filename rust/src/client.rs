@@ -150,7 +150,8 @@ impl Client {
             "fileName": file_name,
         });
 
-        let resp: CreateJobFromUrlResponse = self.request("POST", "/jobs/from-url", Some(body)).await?;
+        let resp: CreateJobFromUrlResponse =
+            self.request("POST", "/jobs/from-url", Some(body)).await?;
         let opts = opts.unwrap_or_default();
         self.poll(&resp.data.job_id, &opts).await
     }
@@ -320,8 +321,7 @@ impl Client {
             let status_code = status.as_u16();
             let response_text = response.text().await.unwrap_or_default();
 
-            let parsed_body: Option<serde_json::Value> =
-                serde_json::from_str(&response_text).ok();
+            let parsed_body: Option<serde_json::Value> = serde_json::from_str(&response_text).ok();
 
             let message = parsed_body
                 .as_ref()
