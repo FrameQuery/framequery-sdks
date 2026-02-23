@@ -7,6 +7,11 @@ on:
   pull_request:
     paths: ["ruby/**"]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to RubyGems"
+        type: boolean
+        default: false
 
 defaults:
   run:
@@ -29,7 +34,7 @@ jobs:
 
   publish:
     needs: test
-    if: startsWith(github.ref, 'refs/tags/ruby-v')
+    if: startsWith(github.ref, 'refs/tags/ruby-v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
