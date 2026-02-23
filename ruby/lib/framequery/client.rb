@@ -5,24 +5,15 @@ require "json"
 require "uri"
 
 module FrameQuery
-  # Synchronous client for the FrameQuery video processing API.
-  #
-  # @example
-  #   client = FrameQuery::Client.new(api_key: "fq_...")
-  #   result = client.process("video.mp4")
-  #   puts result.scenes.map(&:description)
   class Client
     DEFAULT_BASE_URL = "https://api.framequery.com/v1/api"
-    DEFAULT_POLL_INTERVAL = 5
-    DEFAULT_TIMEOUT = 86_400
-    DEFAULT_MAX_RETRIES = 2
-    DEFAULT_HTTP_TIMEOUT = 300
+    DEFAULT_POLL_INTERVAL = 5       # seconds between status polls
+    DEFAULT_TIMEOUT = 86_400        # max wait for polling (24h)
+    DEFAULT_MAX_RETRIES = 2         # retries on 5xx/429/network errors
+    DEFAULT_HTTP_TIMEOUT = 300      # per-request timeout (seconds)
     VERSION = "0.1.0"
 
-    # @param api_key [String, nil] API key (falls back to FRAMEQUERY_API_KEY env var)
-    # @param base_url [String] API base URL
-    # @param timeout [Integer] HTTP timeout in seconds
-    # @param max_retries [Integer] max retries on transient errors
+    # Falls back to ENV["FRAMEQUERY_API_KEY"] when api_key is nil.
     def initialize(api_key: nil, base_url: DEFAULT_BASE_URL, timeout: DEFAULT_HTTP_TIMEOUT, max_retries: DEFAULT_MAX_RETRIES)
       @api_key = api_key || ENV.fetch("FRAMEQUERY_API_KEY") {
         raise ArgumentError, "api_key is required. Pass it explicitly or set FRAMEQUERY_API_KEY."
@@ -32,27 +23,14 @@ module FrameQuery
       @max_retries = max_retries
     end
 
-    # Upload a video file and wait for processing to complete.
-    #
-    # @param file_path [String] path to the local video file
-    # @param filename [String, nil] object name override
-    # @param poll_interval [Integer] seconds between status polls
-    # @param timeout [Integer] maximum seconds to wait
-    # @yield [Job] optional progress callback invoked on each poll
-    # @return [ProcessingResult]
+    # Upload + poll until done. Pass a block to get progress callbacks.
+    # Raises JobFailedError or TimeoutError if things go wrong.
     def process(file_path, filename: nil, poll_interval: DEFAULT_POLL_INTERVAL, timeout: DEFAULT_TIMEOUT, &on_progress)
       job = upload(file_path, filename: filename)
       poll(job.id, poll_interval, timeout, &on_progress)
     end
 
-    # Submit a URL for processing and wait for completion.
-    #
-    # @param url [String] public HTTP(S) URL of the video
-    # @param filename [String, nil] optional filename hint
-    # @param poll_interval [Integer] seconds between polls
-    # @param timeout [Integer] max seconds to wait
-    # @yield [Job] optional progress callback
-    # @return [ProcessingResult]
+    # Same as #process but takes a public URL instead of a local file.
     def process_url(url, filename: nil, poll_interval: DEFAULT_POLL_INTERVAL, timeout: DEFAULT_TIMEOUT, &on_progress)
       body = { url: url }
       body[:fileName] = filename if filename
@@ -61,11 +39,7 @@ module FrameQuery
       poll(job.id, poll_interval, timeout, &on_progress)
     end
 
-    # Upload a video and return the Job immediately (does not wait).
-    #
-    # @param file_path [String] path to the local video file
-    # @param filename [String, nil] object name override
-    # @return [Job]
+    # Upload only -- returns a Job without polling. Use #get_job later.
     def upload(file_path, filename: nil)
       raise Errno::ENOENT, file_path unless File.file?(file_path)
 
@@ -73,7 +47,7 @@ module FrameQuery
       data = request(:post, "/jobs", body: { fileName: name })
       upload_url = data["uploadUrl"]
 
-      # PUT file to signed URL
+      # PUT to the signed GCS URL
       uri = URI.parse(upload_url)
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = uri.scheme == "https"
@@ -93,21 +67,12 @@ module FrameQuery
       Parsers.parse_job(data)
     end
 
-    # Fetch the current state of a job.
-    #
-    # @param job_id [String]
-    # @return [Job]
     def get_job(job_id)
       data = request(:get, "/jobs/#{URI.encode_www_form_component(job_id)}")
       Parsers.parse_job(data)
     end
 
-    # List jobs with optional filtering and pagination.
-    #
-    # @param limit [Integer]
-    # @param cursor [String, nil]
-    # @param status [String, nil]
-    # @return [JobPage]
+    # Paginated. Pass cursor from JobPage#next_cursor to get the next page.
     def list_jobs(limit: 20, cursor: nil, status: nil)
       params = { limit: limit }
       params[:cursor] = cursor if cursor
@@ -118,9 +83,6 @@ module FrameQuery
       JobPage.new(jobs: jobs, next_cursor: raw["nextCursor"])
     end
 
-    # Get the current account quota.
-    #
-    # @return [Quota]
     def get_quota
       data = request(:get, "/quota")
       Parsers.parse_quota(data)
@@ -128,13 +90,14 @@ module FrameQuery
 
     private
 
-    # Make a request, unwrap the "data" envelope.
+    # Unwraps the "data" key from the response envelope.
     def request(method, path, body: nil, params: nil)
       raw = request_raw(method, path, body: body, params: params)
       raw.key?("data") ? raw["data"] : raw
     end
 
-    # Make a request, return raw JSON hash.
+    # Returns the full parsed JSON. Retries 5xx, 429, and network errors
+    # with exponential backoff (respects Retry-After header).
     def request_raw(method, path, body: nil, params: nil)
       uri = build_uri(path, params)
       last_error = nil
@@ -149,7 +112,7 @@ module FrameQuery
           req = build_request(method, uri, body)
           resp = http.request(req)
 
-          # Retry on 5xx / 429
+          # Retry on server errors / rate limits
           if resp.code.to_i >= 500 || resp.code.to_i == 429
             if attempt < @max_retries
               delay = backoff_delay(attempt, resp)
@@ -246,7 +209,7 @@ module FrameQuery
           raise FrameQuery::TimeoutError, "Timed out after #{timeout}s waiting for job #{job_id}"
         end
 
-        # Adaptive polling
+        # Back off when ETA is long so we're not hammering the API
         if job.eta_seconds && job.eta_seconds > 60
           interval = [job.eta_seconds / 3.0, 30.0].min
         else

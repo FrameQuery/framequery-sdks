@@ -25,16 +25,7 @@ const DEFAULT_TIMEOUT = 86_400_000; // 24h
 const DEFAULT_MAX_RETRIES = 2;
 const VERSION = "0.1.0";
 
-/**
- * FrameQuery client for video processing.
- *
- * @example
- * ```ts
- * const fq = new FrameQuery({ apiKey: "fq_..." });
- * const result = await fq.process("./video.mp4");
- * console.log(result.scenes);
- * ```
- */
+/** Main client. Talks to the FrameQuery REST API. */
 export class FrameQuery {
   private readonly baseUrl: string;
   private readonly apiKey: string;
@@ -64,9 +55,8 @@ export class FrameQuery {
   }
 
   /**
-   * Upload a video and wait for processing to complete.
-   *
-   * In Node.js, pass a file path string. In browsers, pass a File/Blob/ArrayBuffer.
+   * Upload + poll until done. Pass a file path (Node) or Blob/ArrayBuffer (browser).
+   * Times out after 24h by default. Override with `options.timeout`.
    */
   async process(
     file: string | Blob | ArrayBuffer | Uint8Array,
@@ -82,7 +72,7 @@ export class FrameQuery {
     );
   }
 
-  /** Submit a URL for processing and wait for completion. */
+  /** Same as process() but takes a public URL instead of a file. */
   async processUrl(
     url: string,
     options?: ProcessOptions,
@@ -103,7 +93,7 @@ export class FrameQuery {
     );
   }
 
-  /** Upload a video and return the Job immediately. */
+  /** Upload only -- returns the Job without polling. */
   async upload(
     file: string | Blob | ArrayBuffer | Uint8Array,
     options?: UploadOptions,
@@ -112,7 +102,7 @@ export class FrameQuery {
     let filename: string;
 
     if (typeof file === "string") {
-      // Node.js file path
+      // file path -- read from disk (Node only)
       const fs = await import("node:fs/promises");
       const path = await import("node:path");
       fileContent = await fs.readFile(file);
@@ -145,13 +135,13 @@ export class FrameQuery {
     return parseJob(data);
   }
 
-  /** Fetch the current state of a job. */
+  /** Poll a single job by ID. */
   async getJob(jobId: string): Promise<Job> {
     const data = await this.request<Record<string, unknown>>("GET", `/jobs/${encodeURIComponent(jobId)}`);
     return parseJob(data);
   }
 
-  /** List jobs with optional filtering and pagination. */
+  /** Paginated job list. Cursor-based. */
   async listJobs(options?: ListJobsOptions): Promise<JobPage> {
     const params = new URLSearchParams();
     if (options?.limit) params.set("limit", String(options.limit));
@@ -169,13 +159,13 @@ export class FrameQuery {
     return { jobs, nextCursor, hasMore: nextCursor !== null };
   }
 
-  /** Get the current account quota. */
+  /** Returns plan info and remaining credit hours. */
   async getQuota(): Promise<Quota> {
     const data = await this.request<Record<string, unknown>>("GET", "/quota");
     return parseQuota(data);
   }
 
-  // ---- Private ----
+  // -- internals --
 
   private async request<T>(
     method: string,
@@ -318,7 +308,7 @@ export class FrameQuery {
         );
       }
 
-      // Adaptive polling
+      // Back off when ETA is long so we're not hammering the API
       if (job.etaSeconds && job.etaSeconds > 60) {
         interval = Math.min(job.etaSeconds / 3 * 1000, 30_000);
       } else {

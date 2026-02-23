@@ -1,8 +1,6 @@
 # FrameQuery SDKs
 
-Official client libraries for the [FrameQuery](https://framequery.com) video processing API.
-
-Upload videos, process them with AI-powered scene detection and transcription, and retrieve structured results, all behind a single function call.
+Client libraries for the [FrameQuery](https://framequery.com) video processing API. Upload a video, get back scenes and transcripts.
 
 ## Languages
 
@@ -16,11 +14,7 @@ Upload videos, process them with AI-powered scene detection and transcription, a
 
 ## Quick Start
 
-Every SDK follows the same high-level pattern:
-
-1. Create a client with your API key
-2. Call `process()` with a file path or URL
-3. Get back typed scenes + transcript
+Same pattern everywhere — create a client, call `process()`, get typed results back.
 
 ### Python
 
@@ -30,7 +24,6 @@ from framequery import FrameQuery
 fq = FrameQuery(api_key="fq_...")
 
 result = fq.process("interview.mp4")
-print(f"Duration: {result.duration}s")
 for scene in result.scenes:
     print(f"  [{scene.end_time}s] {scene.description}")
 for seg in result.transcript:
@@ -45,9 +38,7 @@ import FrameQuery from "framequery";
 const fq = new FrameQuery({ apiKey: "fq_..." });
 
 const result = await fq.process("./interview.mp4");
-console.log(`Duration: ${result.duration}s`);
-result.scenes.forEach((s) => console.log(`  [${s.endTime}s] ${s.description}`));
-result.transcript.forEach((t) => console.log(`  [${t.startTime}-${t.endTime}s] ${t.text}`));
+result.scenes.forEach((s) => console.log(`[${s.endTime}s] ${s.description}`));
 ```
 
 ### Go
@@ -59,9 +50,8 @@ result, err := client.Process(ctx, "interview.mp4", nil)
 if err != nil {
     log.Fatal(err)
 }
-fmt.Printf("Duration: %.1fs\n", result.Duration)
 for _, s := range result.Scenes {
-    fmt.Printf("  [%.1fs] %s\n", s.EndTime, s.Description)
+    fmt.Printf("[%.1fs] %s\n", s.EndTime, s.Description)
 }
 ```
 
@@ -71,9 +61,8 @@ for _, s := range result.Scenes {
 let client = framequery::Client::new("fq_...");
 
 let result = client.process("interview.mp4", None).await?;
-println!("Duration: {}s", result.duration);
 for scene in &result.scenes {
-    println!("  [{}s] {}", scene.end_time, scene.description);
+    println!("[{}s] {}", scene.end_time, scene.description);
 }
 ```
 
@@ -83,67 +72,44 @@ for scene in &result.scenes {
 client = FrameQuery::Client.new(api_key: "fq_...")
 
 result = client.process("interview.mp4")
-puts "Duration: #{result.duration}s"
-result.scenes.each { |s| puts "  [#{s.end_time}s] #{s.description}" }
+result.scenes.each { |s| puts "[#{s.end_time}s] #{s.description}" }
 ```
 
-## API Key
+## Auth
 
-Get your API key from the [FrameQuery dashboard](https://app.framequery.com/settings/api-keys).
-
-All SDKs read `FRAMEQUERY_API_KEY` from the environment if no key is passed explicitly:
+Grab an API key from the [dashboard](https://app.framequery.com/settings/api-keys). Every SDK also checks `FRAMEQUERY_API_KEY` from the environment:
 
 ```bash
 export FRAMEQUERY_API_KEY=fq_...
 ```
 
-## Common Patterns
-
-### Process from URL (no local file needed)
+## Other Things You Can Do
 
 ```python
+# Process from a URL instead of a local file
 result = fq.process_url("https://cdn.example.com/video.mp4")
-```
 
-### Upload without waiting
-
-```python
+# Upload without blocking — returns a job you can poll later
 job = fq.upload("video.mp4")
-print(job.id)  # available immediately
+print(job.id)
 
-# Later...
-job = fq.get_job(job.id)
-if job.is_terminal:
-    print(job.status)
-```
+# Progress callback
+result = fq.process("video.mp4", on_progress=lambda j: print(j.status))
 
-### Progress tracking
-
-```python
-def on_progress(job):
-    print(f"Status: {job.status}, ETA: {job.eta_seconds}s")
-
-result = fq.process("video.mp4", on_progress=on_progress)
-```
-
-### Check quota
-
-```python
+# Check your quota
 quota = fq.get_quota()
-print(f"{quota.plan}: {quota.credits_balance_hours}h credits remaining")
+print(f"{quota.credits_balance_hours}h remaining")
 ```
 
-## API Reference
+## Endpoints
 
-All SDKs wrap the same REST endpoints:
-
-| Method | Endpoint | Description |
+| Method | Endpoint | What it does |
 |---|---|---|
-| `POST` | `/v1/api/jobs` | Create job + get upload URL |
-| `POST` | `/v1/api/jobs/from-url` | Create job from remote URL |
-| `GET` | `/v1/api/jobs/{jobId}` | Get job status + results |
-| `GET` | `/v1/api/jobs` | List jobs (paginated) |
-| `GET` | `/v1/api/quota` | Check remaining quota |
+| `POST` | `/v1/api/jobs` | Create a job, get a signed upload URL back |
+| `POST` | `/v1/api/jobs/from-url` | Create a job from a remote URL |
+| `GET` | `/v1/api/jobs/{jobId}` | Get job status and results |
+| `GET` | `/v1/api/jobs` | List jobs (cursor-paginated) |
+| `GET` | `/v1/api/quota` | Check remaining hours |
 
 ## License
 

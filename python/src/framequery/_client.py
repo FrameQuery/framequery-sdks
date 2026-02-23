@@ -30,15 +30,12 @@ from ._models import (
 
 
 class FrameQuery:
-    """Synchronous client for the FrameQuery video processing API.
+    """Sync client. Also works as a context manager.
 
-    Usage::
-
-        from framequery import FrameQuery
+    ::
 
         fq = FrameQuery(api_key="fq_...")
         result = fq.process("video.mp4")
-        print(result.scenes)
     """
 
     def __init__(
@@ -71,17 +68,11 @@ class FrameQuery:
         timeout: float = DEFAULT_TIMEOUT,
         on_progress: Optional[Callable[[Job], None]] = None,
     ) -> ProcessingResult:
-        """Upload a video file and wait for processing to complete.
+        """Upload a video and poll until done.
 
-        Args:
-            file: Local file path (str/Path) or a readable binary file object.
-            filename: Object name in the ingest bucket. Defaults to the file's name.
-            poll_interval: Seconds between status polls. Default 5.
-            timeout: Maximum seconds to wait for completion. Default 24h.
-            on_progress: Optional callback invoked on each poll with the current Job.
-
-        Returns:
-            ProcessingResult with scenes, transcript, and duration.
+        Accepts a path, Path, or file-like object. Polls every ``poll_interval``
+        seconds (default 5) up to ``timeout`` seconds (default 24h). Pass
+        ``on_progress`` to get the Job on each poll tick.
         """
         job = self.upload(file, filename=filename)
         return self._poll(job.id, poll_interval, timeout, on_progress)
@@ -95,18 +86,7 @@ class FrameQuery:
         timeout: float = DEFAULT_TIMEOUT,
         on_progress: Optional[Callable[[Job], None]] = None,
     ) -> ProcessingResult:
-        """Submit a URL for processing and wait for completion.
-
-        Args:
-            url: Public HTTP(S) URL of the video to process.
-            filename: Optional filename hint.
-            poll_interval: Seconds between status polls.
-            timeout: Maximum seconds to wait.
-            on_progress: Optional progress callback.
-
-        Returns:
-            ProcessingResult with scenes, transcript, and duration.
-        """
+        """Like ``process()`` but takes a public URL instead of a local file."""
         body: Dict[str, str] = {"url": url}
         if filename:
             body["fileName"] = filename
@@ -120,14 +100,9 @@ class FrameQuery:
         *,
         filename: Optional[str] = None,
     ) -> Job:
-        """Upload a video and return the Job immediately (does not wait).
+        """Upload a video and return the Job without polling.
 
-        Args:
-            file: Local file path or binary file object.
-            filename: Object name override.
-
-        Returns:
-            Job with id and status.
+        Use ``get_job()`` later to check status.
         """
         if isinstance(file, (str, Path)):
             path = Path(file)
@@ -147,7 +122,6 @@ class FrameQuery:
         return _parse_job(data)
 
     def get_job(self, job_id: str) -> Job:
-        """Fetch the current state of a job."""
         data = self._request("GET", f"/jobs/{job_id}")
         return _parse_job(data)
 
@@ -158,7 +132,6 @@ class FrameQuery:
         cursor: Optional[str] = None,
         status: Optional[str] = None,
     ) -> JobPage:
-        """List jobs with optional filtering and pagination."""
         params: Dict[str, Any] = {"limit": limit}
         if cursor:
             params["cursor"] = cursor
@@ -170,12 +143,10 @@ class FrameQuery:
         return JobPage(jobs=jobs, next_cursor=raw.get("nextCursor"))
 
     def get_quota(self) -> Quota:
-        """Get the current account quota."""
         data = self._request("GET", "/quota")
         return _parse_quota(data)
 
     def close(self) -> None:
-        """Close the underlying HTTP client."""
         self._client.close()
 
     def __enter__(self) -> "FrameQuery":
@@ -187,19 +158,17 @@ class FrameQuery:
     # ---- Private ----
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
-        """Make an API request with retry logic. Returns unwrapped data."""
         resp = self._do_request(method, path, **kwargs)
         return handle_response(resp)
 
     def _request_raw(self, method: str, path: str, **kwargs: Any) -> Dict[str, Any]:
-        """Make an API request, return the raw JSON body (not unwrapped)."""
         resp = self._do_request(method, path, **kwargs)
         if not resp.is_success:
             handle_response(resp)  # raises
         return resp.json()  # type: ignore[no-any-return]
 
     def _do_request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        """Execute request with retries on transient errors."""
+        """Retries on 5xx, 429, and transport errors with exponential backoff."""
         url = f"{self._base_url}{path}"
         last_exc: Optional[Exception] = None
 
@@ -226,7 +195,6 @@ class FrameQuery:
         raise FrameQueryError("Request failed")  # unreachable
 
     def _upload_to_signed_url(self, url: str, file_data: Any) -> None:
-        """PUT file bytes to a signed GCS URL."""
         resp = self._client.put(
             url,
             content=file_data if isinstance(file_data, (bytes, bytearray)) else file_data,
@@ -244,7 +212,6 @@ class FrameQuery:
         timeout: float,
         on_progress: Optional[Callable[[Job], None]],
     ) -> ProcessingResult:
-        """Poll a job until it reaches a terminal state."""
         deadline = time.time() + timeout
         interval = poll_interval
 
@@ -266,7 +233,7 @@ class FrameQuery:
                     f"Timed out after {timeout}s waiting for job {job_id}"
                 )
 
-            # Adaptive polling: slow down for long-running jobs
+            # Back off for long jobs so we're not hammering the API
             if job.eta_seconds and job.eta_seconds > 60:
                 interval = min(job.eta_seconds / 3, 30.0)
             else:
@@ -276,7 +243,7 @@ class FrameQuery:
 
 
 def _backoff_delay(attempt: int, response: Optional[httpx.Response] = None) -> float:
-    """Exponential backoff: 0.5s, 1s, 2s, ..."""
+    # 0.5s, 1s, 2s, ... capped at 30s. Honors Retry-After header.
     if response is not None:
         ra = response.headers.get("Retry-After")
         if ra:

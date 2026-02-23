@@ -1,9 +1,4 @@
-//! Quick-start examples for the FrameQuery Rust SDK.
-//!
-//! Run with:
-//!   FRAMEQUERY_API_KEY=fq_live_... cargo run --example quickstart
-//!
-//! Or pass the key directly in code (not recommended for production).
+//! FRAMEQUERY_API_KEY=fq_live_... cargo run --example quickstart
 
 use framequery::{Client, ClientBuilder, ProcessOptions};
 use std::time::Duration;

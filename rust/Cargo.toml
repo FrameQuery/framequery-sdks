@@ -2,7 +2,7 @@
 name = "framequery"
 version = "0.1.0"
 edition = "2021"
-description = "Official Rust SDK for the FrameQuery video processing API"
+description = "Rust client for the FrameQuery API"
 license = "MIT"
 repository = "https://github.com/framequery/framequery-sdks"
 keywords = ["video", "processing", "api", "framequery"]

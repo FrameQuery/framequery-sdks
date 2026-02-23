@@ -1,14 +1,8 @@
 # frozen_string_literal: true
 
 module FrameQuery
-  # A single detected scene in the video.
   class Scene
-    # @return [String]
-    attr_reader :description
-    # @return [Float]
-    attr_reader :end_time
-    # @return [Array<String>]
-    attr_reader :objects
+    attr_reader :description, :end_time, :objects
 
     def initialize(description:, end_time:, objects: [])
       @description = description
@@ -17,14 +11,8 @@ module FrameQuery
     end
   end
 
-  # A segment of the video transcript.
   class TranscriptSegment
-    # @return [Float]
-    attr_reader :start_time
-    # @return [Float]
-    attr_reader :end_time
-    # @return [String]
-    attr_reader :text
+    attr_reader :start_time, :end_time, :text
 
     def initialize(start_time:, end_time:, text:)
       @start_time = start_time
@@ -33,7 +21,8 @@ module FrameQuery
     end
   end
 
-  # Complete result of a processed video job.
+  # Returned by #process / #process_url after the job finishes.
+  # `raw` holds the full API response if you need fields we don't wrap.
   class ProcessingResult
     attr_reader :job_id, :status, :filename, :duration, :scenes, :transcript, :created_at, :raw
 
@@ -49,7 +38,9 @@ module FrameQuery
     end
   end
 
-  # A video processing job.
+  # Represents a processing job. Status values:
+  #   PENDING_ORCHESTRATION, FFMPEG_PROCESSING, VISION_API_PROCESSING,
+  #   STT_PROCESSING, COMPLETED, COMPLETED_NO_SCENES, FAILED
   class Job
     attr_reader :id, :status, :filename, :created_at, :eta_seconds, :raw
 
@@ -62,23 +53,19 @@ module FrameQuery
       @raw = raw
     end
 
-    # @return [Boolean] true if the job has reached a final state.
     def terminal?
       %w[COMPLETED COMPLETED_NO_SCENES FAILED].include?(@status)
     end
 
-    # @return [Boolean] true if the job completed successfully.
     def complete?
       %w[COMPLETED COMPLETED_NO_SCENES].include?(@status)
     end
 
-    # @return [Boolean] true if the job failed.
     def failed?
       @status == "FAILED"
     end
   end
 
-  # Account quota information.
   class Quota
     attr_reader :plan, :included_hours, :credits_balance_hours, :reset_date
 
@@ -90,7 +77,6 @@ module FrameQuery
     end
   end
 
-  # Paginated list of jobs.
   class JobPage
     attr_reader :jobs, :next_cursor
 
@@ -99,7 +85,6 @@ module FrameQuery
       @next_cursor = next_cursor
     end
 
-    # @return [Boolean] true if there are more pages.
     def more?
       !@next_cursor.nil?
     end

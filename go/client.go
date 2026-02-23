@@ -1,9 +1,4 @@
-// Package framequery provides a high-level Go client for the FrameQuery video processing API.
-//
-// Upload videos, process them with AI-powered scene detection and transcription,
-// and retrieve structured results through a simple interface.
-//
-// Usage:
+// Package framequery wraps the FrameQuery API (upload, process, poll, list jobs).
 //
 //	client := framequery.New("fq_your_api_key")
 //	result, err := client.Process(ctx, "video.mp4", nil)
@@ -34,7 +29,7 @@ const (
 	version             = "0.1.0"
 )
 
-// Client is the FrameQuery API client.
+// Client holds auth credentials and HTTP configuration for API calls.
 type Client struct {
 	baseURL    string
 	apiKey     string
@@ -42,31 +37,30 @@ type Client struct {
 	maxRetries int
 }
 
-// Option configures the Client.
+// Option is a functional option for New.
 type Option func(*Client)
 
-// WithBaseURL sets a custom API base URL.
+// WithBaseURL overrides the default API endpoint (https://api.framequery.com/v1/api).
 func WithBaseURL(u string) Option {
 	return func(c *Client) { c.baseURL = u }
 }
 
-// WithHTTPClient sets a custom http.Client.
+// WithHTTPClient replaces the default http.Client (5m timeout).
 func WithHTTPClient(hc *http.Client) Option {
 	return func(c *Client) { c.httpClient = hc }
 }
 
-// WithMaxRetries sets the maximum number of retries for transient errors.
+// WithMaxRetries sets retry count for 5xx and 429 responses (default 2).
 func WithMaxRetries(n int) Option {
 	return func(c *Client) { c.maxRetries = n }
 }
 
-// WithTimeout sets the HTTP client timeout.
+// WithTimeout sets the per-request HTTP timeout (default 5m).
 func WithTimeout(d time.Duration) Option {
 	return func(c *Client) { c.httpClient.Timeout = d }
 }
 
-// New creates a new FrameQuery client.
-// If apiKey is empty, it reads FRAMEQUERY_API_KEY from the environment.
+// New creates a Client. Falls back to FRAMEQUERY_API_KEY env var if apiKey is empty.
 func New(apiKey string, opts ...Option) *Client {
 	if apiKey == "" {
 		apiKey = os.Getenv("FRAMEQUERY_API_KEY")
@@ -83,7 +77,7 @@ func New(apiKey string, opts ...Option) *Client {
 	return c
 }
 
-// Process uploads a local video file and waits for processing to complete.
+// Process uploads a video file from disk and blocks until the job finishes or fails.
 func (c *Client) Process(ctx context.Context, path string, opts *ProcessOptions) (*ProcessingResult, error) {
 	job, err := c.Upload(ctx, path, nil)
 	if err != nil {
@@ -92,7 +86,7 @@ func (c *Client) Process(ctx context.Context, path string, opts *ProcessOptions)
 	return c.poll(ctx, job.ID, opts)
 }
 
-// ProcessURL submits a URL for processing and waits for completion.
+// ProcessURL submits a remote video URL and blocks until the job finishes or fails.
 func (c *Client) ProcessURL(ctx context.Context, videoURL string, opts *ProcessOptions) (*ProcessingResult, error) {
 	body := map[string]string{"url": videoURL}
 	var resp createJobFromURLResponse
@@ -102,7 +96,7 @@ func (c *Client) ProcessURL(ctx context.Context, videoURL string, opts *ProcessO
 	return c.poll(ctx, resp.JobID, opts)
 }
 
-// Upload uploads a local video file and returns the Job immediately.
+// Upload sends a video file and returns the Job without waiting for processing.
 func (c *Client) Upload(ctx context.Context, path string, opts *UploadOptions) (*Job, error) {
 	filename := filepath.Base(path)
 	if opts != nil && opts.Filename != "" {
@@ -147,7 +141,7 @@ func (c *Client) Upload(ctx context.Context, path string, opts *UploadOptions) (
 	}, nil
 }
 
-// GetJob fetches the current state of a job.
+// GetJob returns a job's current status and results.
 func (c *Client) GetJob(ctx context.Context, jobID string) (*Job, error) {
 	var raw map[string]any
 	if err := c.doJSON(ctx, http.MethodGet, "/jobs/"+url.PathEscape(jobID), nil, &raw); err != nil {
@@ -156,7 +150,7 @@ func (c *Client) GetJob(ctx context.Context, jobID string) (*Job, error) {
 	return parseJob(raw), nil
 }
 
-// ListJobs lists jobs with optional filtering and cursor-based pagination.
+// ListJobs returns a page of jobs. Supports cursor pagination and status filtering.
 func (c *Client) ListJobs(ctx context.Context, opts *ListJobsOptions) (*JobPage, error) {
 	path := "/jobs"
 	params := url.Values{}
@@ -195,7 +189,7 @@ func (c *Client) ListJobs(ctx context.Context, opts *ListJobsOptions) (*JobPage,
 	return page, nil
 }
 
-// GetQuota returns the current account quota.
+// GetQuota returns included hours, credit balance, and plan info.
 func (c *Client) GetQuota(ctx context.Context) (*Quota, error) {
 	var q Quota
 	if err := c.doJSON(ctx, http.MethodGet, "/quota", nil, &q); err != nil {
@@ -266,7 +260,7 @@ func (c *Client) poll(ctx context.Context, jobID string, opts *ProcessOptions) (
 	}
 }
 
-// doJSON makes an API request that returns {"data": ...} and unmarshals data into out.
+// doJSON makes an API request, unwraps the {"data": ...} envelope, and decodes into out.
 func (c *Client) doJSON(ctx context.Context, method, path string, body any, out any) error {
 	raw, err := c.doJSONRaw(ctx, method, path, body)
 	if err != nil {
@@ -288,7 +282,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body any, out 
 	return json.Unmarshal(b, out)
 }
 
-// doJSONRaw makes an API request and returns the full JSON response as a map.
+// doJSONRaw makes an API request and returns the raw JSON response. Retries on 5xx/429.
 func (c *Client) doJSONRaw(ctx context.Context, method, path string, body any) (map[string]any, error) {
 	apiURL := c.baseURL + path
 

@@ -1,21 +1,19 @@
 # frozen_string_literal: true
 
 module FrameQuery
-  # Base error class for all FrameQuery SDK errors.
   class Error < StandardError; end
 
-  # Raised when the API key is invalid or missing (HTTP 401).
+  # 401
   class AuthenticationError < Error; end
 
-  # Raised when the API key lacks required scopes (HTTP 403).
+  # 403
   class PermissionDeniedError < Error; end
 
-  # Raised when the requested resource does not exist (HTTP 404).
+  # 404
   class NotFoundError < Error; end
 
-  # Raised when the API rate limit is exceeded (HTTP 429).
+  # 429 — check retry_after for the server-suggested wait (may be nil)
   class RateLimitError < Error
-    # @return [Float, nil] seconds to wait before retrying
     attr_reader :retry_after
 
     def initialize(message = "Rate limit exceeded", retry_after: nil)
@@ -24,12 +22,9 @@ module FrameQuery
     end
   end
 
-  # Raised for unexpected HTTP errors from the API.
+  # Any other non-2xx response. status_code and body give you the raw details.
   class APIError < Error
-    # @return [Integer] HTTP status code
-    attr_reader :status_code
-    # @return [Hash, nil] parsed response body
-    attr_reader :body
+    attr_reader :status_code, :body
 
     def initialize(message, status_code:, body: nil)
       super(message)
@@ -38,9 +33,8 @@ module FrameQuery
     end
   end
 
-  # Raised when a polled job reaches FAILED status.
+  # Job reached FAILED status during polling.
   class JobFailedError < Error
-    # @return [String] the failed job's ID
     attr_reader :job_id
 
     def initialize(job_id, message = "")
@@ -51,6 +45,6 @@ module FrameQuery
     end
   end
 
-  # Raised when polling times out.
+  # Polling exceeded the timeout.
   class TimeoutError < Error; end
 end

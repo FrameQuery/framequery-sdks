@@ -6,8 +6,6 @@ from typing import Any, Dict, List, Optional
 
 @dataclass(frozen=True)
 class Scene:
-    """A single detected scene in the video."""
-
     description: str
     end_time: float
     objects: List[str] = field(default_factory=list)
@@ -15,8 +13,6 @@ class Scene:
 
 @dataclass(frozen=True)
 class TranscriptSegment:
-    """A segment of the video transcript."""
-
     start_time: float
     end_time: float
     text: str
@@ -24,7 +20,11 @@ class TranscriptSegment:
 
 @dataclass(frozen=True)
 class ProcessingResult:
-    """Complete result of a processed video job."""
+    """Scenes, transcript, and metadata for a completed job.
+
+    ``raw`` contains the full API response dict if you need fields
+    not mapped here.
+    """
 
     job_id: str
     status: str
@@ -38,7 +38,7 @@ class ProcessingResult:
 
 @dataclass
 class Job:
-    """A video processing job."""
+    """Tracks a video processing job. Poll ``is_terminal`` to know when it's done."""
 
     id: str
     status: str
@@ -62,8 +62,6 @@ class Job:
 
 @dataclass(frozen=True)
 class Quota:
-    """Account quota information."""
-
     plan: str
     included_hours: float
     credits_balance_hours: float
@@ -72,8 +70,6 @@ class Quota:
 
 @dataclass
 class JobPage:
-    """Paginated list of jobs."""
-
     jobs: List[Job]
     next_cursor: Optional[str]
 

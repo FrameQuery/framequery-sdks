@@ -1,7 +1,7 @@
 {
   "name": "framequery",
   "version": "0.1.0",
-  "description": "Official TypeScript/JavaScript SDK for the FrameQuery video processing API",
+  "description": "TypeScript client for the FrameQuery API",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 class FrameQueryError(Exception):
-    """Base exception for all FrameQuery SDK errors."""
+    """Base for all SDK errors."""
 
     def __init__(self, message: str) -> None:
         self.message = message
@@ -10,19 +10,19 @@ class FrameQueryError(Exception):
 
 
 class AuthenticationError(FrameQueryError):
-    """Raised when the API key is invalid or missing (HTTP 401)."""
+    """HTTP 401 -- bad or missing API key."""
 
 
 class PermissionDeniedError(FrameQueryError):
-    """Raised when the API key lacks required scopes (HTTP 403)."""
+    """HTTP 403 -- key lacks required scopes."""
 
 
 class NotFoundError(FrameQueryError):
-    """Raised when the requested resource does not exist (HTTP 404)."""
+    """HTTP 404."""
 
 
 class RateLimitError(FrameQueryError):
-    """Raised when the API rate limit is exceeded (HTTP 429)."""
+    """HTTP 429. Check ``retry_after`` for the server-suggested wait (seconds)."""
 
     def __init__(self, message: str, retry_after: float | None = None) -> None:
         super().__init__(message)
@@ -30,7 +30,7 @@ class RateLimitError(FrameQueryError):
 
 
 class APIError(FrameQueryError):
-    """Raised for unexpected HTTP errors from the API."""
+    """Catch-all for non-2xx responses not covered above."""
 
     def __init__(
         self,
@@ -44,7 +44,7 @@ class APIError(FrameQueryError):
 
 
 class JobFailedError(FrameQueryError):
-    """Raised when a polled job reaches FAILED status."""
+    """The job reached FAILED status during polling."""
 
     def __init__(self, job_id: str, message: str = "") -> None:
         msg = f"Job {job_id} failed"

@@ -2,28 +2,28 @@ package framequery
 
 import "time"
 
-// Scene represents a detected scene in the video.
+// Scene is a single detected scene with a description, end timestamp, and tagged objects.
 type Scene struct {
 	Description string   `json:"description"`
 	EndTime     float64  `json:"endTs"`
 	Objects     []string `json:"objects"`
 }
 
-// TranscriptSegment represents a segment of the video transcript.
+// TranscriptSegment is one timed chunk of the speech-to-text transcript.
 type TranscriptSegment struct {
 	StartTime float64 `json:"StartTime"`
 	EndTime   float64 `json:"EndTime"`
 	Text      string  `json:"Text"`
 }
 
-// ProcessedData is the nested processedData field in a job response.
+// ProcessedData maps to the processedData field in the job JSON.
 type ProcessedData struct {
 	Length     float64             `json:"length"`
 	Scenes     []Scene            `json:"scenes"`
 	Transcript []TranscriptSegment `json:"transcript"`
 }
 
-// ProcessingResult is the complete result of a processed video.
+// ProcessingResult is returned when a job reaches a terminal success state.
 type ProcessingResult struct {
 	JobID      string
 	Status     string
@@ -35,7 +35,7 @@ type ProcessingResult struct {
 	Raw        map[string]any
 }
 
-// Job represents a video processing job.
+// Job tracks a video through the processing pipeline. Raw holds the full API response.
 type Job struct {
 	ID         string
 	Status     string
@@ -45,22 +45,22 @@ type Job struct {
 	Raw        map[string]any
 }
 
-// IsTerminal returns true if the job has reached a final state.
+// IsTerminal reports whether the job is done (COMPLETED, COMPLETED_NO_SCENES, or FAILED).
 func (j *Job) IsTerminal() bool {
 	return j.Status == "COMPLETED" || j.Status == "COMPLETED_NO_SCENES" || j.Status == "FAILED"
 }
 
-// IsComplete returns true if the job completed successfully.
+// IsComplete reports whether the job finished successfully (COMPLETED or COMPLETED_NO_SCENES).
 func (j *Job) IsComplete() bool {
 	return j.Status == "COMPLETED" || j.Status == "COMPLETED_NO_SCENES"
 }
 
-// IsFailed returns true if the job failed.
+// IsFailed reports whether the job status is FAILED.
 func (j *Job) IsFailed() bool {
 	return j.Status == "FAILED"
 }
 
-// Quota contains account quota information.
+// Quota holds the account's plan, included hours, credit balance, and reset date.
 type Quota struct {
 	Plan                string  `json:"plan"`
 	IncludedHours       float64 `json:"includedHours"`
@@ -68,30 +68,31 @@ type Quota struct {
 	ResetDate           string  `json:"resetDate"`
 }
 
-// JobPage is a paginated list of jobs.
+// JobPage is one page from ListJobs. Use NextCursor to fetch the next page.
 type JobPage struct {
 	Jobs       []Job
 	NextCursor string
 }
 
-// HasMore returns true if there are more pages available.
+// HasMore reports whether another page is available.
 func (p *JobPage) HasMore() bool {
 	return p.NextCursor != ""
 }
 
-// ProcessOptions configures the Process and ProcessURL methods.
+// ProcessOptions tunes polling behavior for Process and ProcessURL.
+// Defaults: 5s poll interval, 24h timeout.
 type ProcessOptions struct {
 	PollInterval time.Duration
 	Timeout      time.Duration
 	OnProgress   func(*Job)
 }
 
-// UploadOptions configures the Upload method.
+// UploadOptions overrides the filename derived from the file path.
 type UploadOptions struct {
 	Filename string
 }
 
-// ListJobsOptions configures the ListJobs method.
+// ListJobsOptions filters and paginates ListJobs.
 type ListJobsOptions struct {
 	Limit  int
 	Cursor string

@@ -1,77 +1,60 @@
-# FrameQuery Python SDK
+# framequery
 
-Official Python client for the [FrameQuery](https://framequery.com) video processing API.
+Python SDK for [FrameQuery](https://framequery.com) -- extract scenes and transcripts from video.
 
-## Installation
+## Install
 
 ```bash
 pip install framequery
 ```
 
-Requires Python 3.9+.
+Python 3.9+
 
-## Quick Start
+## Usage
 
 ```python
 from framequery import FrameQuery
 
 fq = FrameQuery(api_key="fq_...")
 
-# Process a video — uploads and waits for results in one call
 result = fq.process("interview.mp4")
 
-print(f"Duration: {result.duration}s")
 for scene in result.scenes:
-    print(f"  [{scene.end_time}s] {scene.description}")
+    print(f"[{scene.end_time}s] {scene.description}")
 for seg in result.transcript:
-    print(f"  [{seg.start_time}-{seg.end_time}s] {seg.text}")
+    print(f"[{seg.start_time}-{seg.end_time}s] {seg.text}")
 ```
 
-## Process from URL
+### From URL
 
 ```python
 result = fq.process_url("https://cdn.example.com/video.mp4")
 ```
 
-## Upload Without Waiting
+### Upload only (don't wait)
 
 ```python
 job = fq.upload("video.mp4")
-print(job.id)  # available immediately
-
-# Check back later
+# ...
 job = fq.get_job(job.id)
-if job.is_complete:
-    print("Done!")
 ```
 
-## Progress Tracking
+### Progress callback
 
 ```python
-def on_progress(job):
-    print(f"Status: {job.status}, ETA: {job.eta_seconds}s")
-
-result = fq.process("video.mp4", on_progress=on_progress)
+result = fq.process("video.mp4", on_progress=lambda j: print(j.status))
 ```
 
-## Async Support
+### Async
 
 ```python
 from framequery import AsyncFrameQuery
 
 async with AsyncFrameQuery(api_key="fq_...") as fq:
     result = await fq.process("video.mp4")
-    print(result.scenes)
 ```
 
-## Check Quota
-
-```python
-quota = fq.get_quota()
-print(f"{quota.plan}: {quota.credits_balance_hours}h credits remaining")
-```
-
-## List Jobs
+### Pagination
 
 ```python
 page = fq.list_jobs(limit=10, status="COMPLETED")
@@ -85,34 +68,25 @@ if page.has_more:
 
 ```python
 fq = FrameQuery(
-    api_key="fq_...",                          # or set FRAMEQUERY_API_KEY env var
-    base_url="https://api.framequery.com/v1/api",  # default
-    timeout=300.0,                              # HTTP timeout in seconds
-    max_retries=2,                              # retries on 5xx/network errors
+    api_key="fq_...",       # or FRAMEQUERY_API_KEY env var
+    timeout=300.0,           # HTTP timeout (seconds), default 300
+    max_retries=2,           # retries on 5xx / network errors, default 2
 )
 ```
 
-## Error Handling
+## Errors
+
+All errors inherit from `FrameQueryError`.
 
 ```python
-from framequery import (
-    FrameQueryError,
-    AuthenticationError,
-    NotFoundError,
-    RateLimitError,
-    JobFailedError,
-)
+from framequery import AuthenticationError, RateLimitError, JobFailedError
 
 try:
     result = fq.process("video.mp4")
-except AuthenticationError:
-    print("Invalid API key")
 except RateLimitError as e:
-    print(f"Rate limited, retry after {e.retry_after}s")
+    print(f"retry after {e.retry_after}s")
 except JobFailedError as e:
-    print(f"Job {e.job_id} failed")
-except FrameQueryError as e:
-    print(f"API error: {e.message}")
+    print(f"job {e.job_id} failed")
 ```
 
 ## License

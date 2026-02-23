@@ -1,123 +1,98 @@
 # FrameQuery Go SDK
 
-Official Go client for the [FrameQuery](https://framequery.com) video processing API.
-
-## Installation
+Go client for the [FrameQuery API](https://framequery.com). Upload videos, poll for results, list jobs, check quota.
 
 ```bash
 go get github.com/framequery/framequery-go
 ```
 
-Requires Go 1.22+. Zero external dependencies.
+Go 1.22+. No external dependencies.
 
-## Quick Start
+## Usage
 
 ```go
-package main
+client := framequery.New("fq_...")
+result, err := client.Process(ctx, "interview.mp4", nil)
+if err != nil {
+    log.Fatal(err)
+}
 
-import (
-    "context"
-    "fmt"
-    "log"
-
-    framequery "github.com/framequery/framequery-go"
-)
-
-func main() {
-    client := framequery.New("fq_...")
-    ctx := context.Background()
-
-    result, err := client.Process(ctx, "interview.mp4", nil)
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    fmt.Printf("Duration: %.1fs\n", result.Duration)
-    for _, s := range result.Scenes {
-        fmt.Printf("  [%.1fs] %s\n", s.EndTime, s.Description)
-    }
-    for _, t := range result.Transcript {
-        fmt.Printf("  [%.1f-%.1fs] %s\n", t.StartTime, t.EndTime, t.Text)
-    }
+for _, s := range result.Scenes {
+    fmt.Printf("[%.1fs] %s\n", s.EndTime, s.Description)
+}
+for _, t := range result.Transcript {
+    fmt.Printf("[%.1f-%.1fs] %s\n", t.StartTime, t.EndTime, t.Text)
 }
 ```
 
-## Process from URL
+### Process from URL
 
 ```go
 result, err := client.ProcessURL(ctx, "https://cdn.example.com/video.mp4", nil)
 ```
 
-## Upload Without Waiting
+### Upload without waiting
 
 ```go
 job, err := client.Upload(ctx, "video.mp4", nil)
-fmt.Println(job.ID) // available immediately
-
-// Check back later
+// ...later
 job, err = client.GetJob(ctx, job.ID)
-if job.IsComplete() {
-    fmt.Println("Done!")
-}
+if job.IsComplete() { /* ... */ }
 ```
 
-## Progress Tracking
+### Progress callback
 
 ```go
 result, err := client.Process(ctx, "video.mp4", &framequery.ProcessOptions{
     OnProgress: func(j *framequery.Job) {
-        fmt.Printf("Status: %s, ETA: %.0fs\n", j.Status, j.ETASeconds)
+        fmt.Printf("%s (ETA: %.0fs)\n", j.Status, j.ETASeconds)
     },
 })
 ```
 
-## Functional Options
+### Client options
 
 ```go
 client := framequery.New("fq_...",
     framequery.WithBaseURL("https://custom.api.com/v1/api"),
-    framequery.WithMaxRetries(3),
-    framequery.WithTimeout(10 * time.Minute),
+    framequery.WithMaxRetries(3),   // default 2
+    framequery.WithTimeout(10*time.Minute), // default 5m per request
     framequery.WithHTTPClient(customClient),
 )
 ```
 
-## Error Handling
+### Error handling
 
 ```go
-job, err := client.GetJob(ctx, "invalid-id")
+_, err := client.GetJob(ctx, "bad-id")
 if framequery.IsNotFoundError(err) {
-    fmt.Println("Job not found")
+    // 404
 } else if framequery.IsAuthError(err) {
-    fmt.Println("Invalid API key")
+    // 401
 } else if framequery.IsRateLimitError(err) {
-    fmt.Println("Rate limited")
-} else if err != nil {
-    fmt.Println("Error:", err)
+    // 429 — retries are automatic, so this means retries were exhausted
 }
 ```
 
-## Check Quota
+### Quota
 
 ```go
-quota, err := client.GetQuota(ctx)
-fmt.Printf("%s: %.1fh credits remaining\n", quota.Plan, quota.CreditsBalanceHours)
+q, _ := client.GetQuota(ctx)
+fmt.Printf("%s: %.1fh credits left\n", q.Plan, q.CreditsBalanceHours)
 ```
 
-## List Jobs
+### List jobs (cursor pagination)
 
 ```go
-page, err := client.ListJobs(ctx, &framequery.ListJobsOptions{
+page, _ := client.ListJobs(ctx, &framequery.ListJobsOptions{
     Limit:  10,
     Status: "COMPLETED",
 })
 for _, j := range page.Jobs {
-    fmt.Printf("%s: %s\n", j.ID, j.Filename)
+    fmt.Println(j.ID, j.Filename)
 }
 if page.HasMore() {
-    nextPage, _ := client.ListJobs(ctx, &framequery.ListJobsOptions{
-        Cursor: page.NextCursor,
-    })
+    next, _ := client.ListJobs(ctx, &framequery.ListJobsOptions{Cursor: page.NextCursor})
 }
 ```
 

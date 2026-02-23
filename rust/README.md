@@ -1,10 +1,8 @@
-# FrameQuery Rust SDK
+# framequery
 
-Official Rust client for the [FrameQuery](https://framequery.com) video processing API. Upload videos, submit URLs, poll for results, and query your account quota with idiomatic async Rust.
+Rust client for the [FrameQuery](https://framequery.com) API.
 
-## Installation
-
-Add to your `Cargo.toml`:
+## Install
 
 ```toml
 [dependencies]
@@ -12,7 +10,7 @@ framequery = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
-## Quick start
+## Usage
 
 ```rust
 use framequery::Client;
@@ -21,7 +19,6 @@ use framequery::Client;
 async fn main() -> framequery::Result<()> {
     let client = Client::new("fq_live_your_api_key");
 
-    // Upload a video and wait for processing to complete
     let result = client.process("meeting.mp4", None).await?;
 
     println!("Duration: {:.1}s", result.duration);
@@ -36,9 +33,7 @@ async fn main() -> framequery::Result<()> {
 }
 ```
 
-## Builder pattern
-
-Use `ClientBuilder` for full control over the client configuration:
+## ClientBuilder
 
 ```rust
 use framequery::ClientBuilder;
@@ -52,11 +47,9 @@ let client = ClientBuilder::new()
     .build()?;
 ```
 
-If you omit `.api_key()`, the builder reads the `FRAMEQUERY_API_KEY` environment variable automatically.
+Falls back to `FRAMEQUERY_API_KEY` env var if `.api_key()` is not called.
 
-## Process a remote URL
-
-Submit a publicly accessible URL for server-side download and processing:
+## Process a URL
 
 ```rust
 let result = client
@@ -66,13 +59,11 @@ let result = client
 
 ## Upload without waiting
 
-If you want to upload a file and check the result later:
-
 ```rust
 let job = client.upload("video.mp4").await?;
 println!("Job ID: {}", job.id);
 
-// Later...
+// later
 let job = client.get_job(&job.id).await?;
 if job.is_complete() {
     println!("Done!");
@@ -80,8 +71,6 @@ if job.is_complete() {
 ```
 
 ## Progress callbacks
-
-Monitor polling progress with a callback:
 
 ```rust
 use framequery::ProcessOptions;
@@ -101,7 +90,7 @@ let opts = ProcessOptions {
 let result = client.process("video.mp4", Some(opts)).await?;
 ```
 
-## List jobs with pagination
+## Pagination
 
 ```rust
 let mut cursor: Option<String> = None;
@@ -121,7 +110,7 @@ loop {
 }
 ```
 
-## Check quota
+## Quota
 
 ```rust
 let quota = client.get_quota().await?;
@@ -131,8 +120,6 @@ println!("Credits: {:.1}h", quota.credits_balance_hours);
 ```
 
 ## Error handling
-
-All methods return `framequery::Result<T>`. Match on `FrameQueryError` variants for fine-grained control:
 
 ```rust
 use framequery::FrameQueryError;
@@ -158,26 +145,22 @@ match client.get_job("nonexistent").await {
 }
 ```
 
-## Features
+## Retries
 
-- **Async/await** -- built on `tokio` and `reqwest` for efficient non-blocking I/O.
-- **Automatic retries** -- transient errors (5xx, 429, network failures) are retried with exponential backoff.
-- **Builder pattern** -- configure base URL, timeouts, retry count, and API key source.
-- **Typed errors** -- `FrameQueryError` enum maps HTTP status codes to descriptive variants.
-- **Progress callbacks** -- optional closure called on each poll iteration.
-- **Pagination** -- cursor-based iteration over job lists.
-- **Raw access** -- every `Job` and `ProcessingResult` includes the full JSON response in `.raw`.
+5xx, 429, and network errors are retried with exponential backoff (1s, 2s, 4s, ...). Default: 3 retries. Configurable via `ClientBuilder::max_retries`.
 
-## API reference
+## API
 
-| Method | Description |
+| Method | Returns |
 |---|---|
-| `client.process(path, opts)` | Upload + poll until complete |
-| `client.process_url(url, opts)` | Submit URL + poll until complete |
-| `client.upload(path)` | Upload only, return immediately |
-| `client.get_job(id)` | Fetch current job state |
-| `client.list_jobs(limit, cursor, status)` | List jobs with pagination |
-| `client.get_quota()` | Get account quota and billing info |
+| `client.process(path, opts)` | Upload + poll to completion |
+| `client.process_url(url, opts)` | Submit URL + poll to completion |
+| `client.upload(path)` | Upload, return `Job` immediately |
+| `client.get_job(id)` | Current job state |
+| `client.list_jobs(limit, cursor, status)` | Paginated job list |
+| `client.get_quota()` | Quota and billing info |
+
+Every `Job` and `ProcessingResult` has a `.raw` field with the full JSON response.
 
 ## License
 

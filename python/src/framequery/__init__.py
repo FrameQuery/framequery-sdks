@@ -1,4 +1,4 @@
-"""FrameQuery Python SDK — AI-powered video scene detection and transcription."""
+"""FrameQuery Python SDK."""
 
 from ._async_client import AsyncFrameQuery
 from ._client import FrameQuery

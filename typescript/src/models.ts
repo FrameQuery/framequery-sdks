@@ -73,7 +73,7 @@ export interface ListJobsOptions {
   status?: string;
 }
 
-// ---- Internal parsers ----
+// -- parsers (map raw API response -> typed objects) --
 
 export function parseJob(data: Record<string, unknown>): Job {
   const status = String(data.status ?? "");

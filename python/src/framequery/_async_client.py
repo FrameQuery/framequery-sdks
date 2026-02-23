@@ -29,15 +29,12 @@ from ._models import (
 
 
 class AsyncFrameQuery:
-    """Async client for the FrameQuery video processing API.
+    """Async version of FrameQuery. Same API, all methods are awaitable.
 
-    Usage::
-
-        from framequery import AsyncFrameQuery
+    ::
 
         async with AsyncFrameQuery(api_key="fq_...") as fq:
             result = await fq.process("video.mp4")
-            print(result.scenes)
     """
 
     def __init__(
@@ -70,7 +67,7 @@ class AsyncFrameQuery:
         timeout: float = DEFAULT_TIMEOUT,
         on_progress: Optional[Callable[[Job], None]] = None,
     ) -> ProcessingResult:
-        """Upload a video and wait for processing to complete."""
+        """Upload a video and poll until done."""
         job = await self.upload(file, filename=filename)
         return await self._poll(job.id, poll_interval, timeout, on_progress)
 
@@ -83,7 +80,7 @@ class AsyncFrameQuery:
         timeout: float = DEFAULT_TIMEOUT,
         on_progress: Optional[Callable[[Job], None]] = None,
     ) -> ProcessingResult:
-        """Submit a URL for processing and wait for completion."""
+        """Like ``process()`` but takes a public URL instead of a local file."""
         body: Dict[str, str] = {"url": url}
         if filename:
             body["fileName"] = filename
@@ -97,7 +94,7 @@ class AsyncFrameQuery:
         *,
         filename: Optional[str] = None,
     ) -> Job:
-        """Upload a video and return the Job immediately."""
+        """Upload a video and return the Job without polling."""
         if isinstance(file, (str, Path)):
             path = Path(file)
             if not path.is_file():
@@ -117,7 +114,6 @@ class AsyncFrameQuery:
         return _parse_job(data)
 
     async def get_job(self, job_id: str) -> Job:
-        """Fetch the current state of a job."""
         data = await self._request("GET", f"/jobs/{job_id}")
         return _parse_job(data)
 
@@ -128,7 +124,6 @@ class AsyncFrameQuery:
         cursor: Optional[str] = None,
         status: Optional[str] = None,
     ) -> JobPage:
-        """List jobs with optional filtering and pagination."""
         params: Dict[str, Any] = {"limit": limit}
         if cursor:
             params["cursor"] = cursor
@@ -140,7 +135,6 @@ class AsyncFrameQuery:
         return JobPage(jobs=jobs, next_cursor=raw.get("nextCursor"))
 
     async def get_quota(self) -> Quota:
-        """Get the current account quota."""
         data = await self._request("GET", "/quota")
         return _parse_quota(data)
 

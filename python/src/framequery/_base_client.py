@@ -21,7 +21,7 @@ def build_headers(api_key: str, user_agent: str) -> Dict[str, str]:
 
 
 def handle_response(response: httpx.Response) -> Any:
-    """Parse a JSON response, raising typed errors for non-2xx status codes."""
+    """Unwrap a JSON response or raise a typed error for non-2xx."""
     if response.is_success:
         if not response.content:
             return None

@@ -17,24 +17,7 @@ const DEFAULT_BASE_URL: &str = "https://api.framequery.com/v1/api";
 const DEFAULT_MAX_RETRIES: u32 = 3;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Builder for constructing a [`Client`] with custom configuration.
-///
-/// # Example
-///
-/// ```no_run
-/// use framequery::ClientBuilder;
-/// use std::time::Duration;
-///
-/// # async fn example() -> framequery::Result<()> {
-/// let client = ClientBuilder::new()
-///     .api_key("fq_live_abc123")
-///     .base_url("https://custom.example.com/v1/api")
-///     .max_retries(5)
-///     .timeout(Duration::from_secs(120))
-///     .build()?;
-/// # Ok(())
-/// # }
-/// ```
+/// Configures and builds a [`Client`].
 pub struct ClientBuilder {
     api_key: Option<String>,
     base_url: String,
@@ -43,7 +26,7 @@ pub struct ClientBuilder {
 }
 
 impl ClientBuilder {
-    /// Create a new builder with default settings.
+    /// Defaults: base URL `https://api.framequery.com/v1/api`, 3 retries, 60s timeout.
     pub fn new() -> Self {
         Self {
             api_key: None,
@@ -53,36 +36,32 @@ impl ClientBuilder {
         }
     }
 
-    /// Set the API key for authentication.
+    /// Set the API key. Overrides the `FRAMEQUERY_API_KEY` env var.
     pub fn api_key(mut self, key: impl Into<String>) -> Self {
         self.api_key = Some(key.into());
         self
     }
 
-    /// Override the base URL (defaults to `https://api.framequery.com/v1/api`).
+    /// Override the base URL.
     pub fn base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = url.into();
         self
     }
 
-    /// Set the maximum number of retries for transient errors (defaults to 3).
+    /// Max retries for 5xx, 429, and network errors. Default: 3.
     pub fn max_retries(mut self, n: u32) -> Self {
         self.max_retries = n;
         self
     }
 
-    /// Set the HTTP request timeout (defaults to 60 seconds).
+    /// Per-request HTTP timeout. Default: 60s.
     pub fn timeout(mut self, d: Duration) -> Self {
         self.timeout = d;
         self
     }
 
-    /// Build the [`Client`].
-    ///
-    /// If no API key was set via [`api_key`](Self::api_key), the builder will
-    /// attempt to read the `FRAMEQUERY_API_KEY` environment variable.
-    ///
-    /// Returns [`FrameQueryError::Authentication`] if no key is available.
+    /// Build the [`Client`]. Falls back to `FRAMEQUERY_API_KEY` env var if no key was set.
+    /// Returns `Err(Authentication)` if no key is found.
     pub fn build(self) -> Result<Client> {
         let api_key = self
             .api_key
@@ -113,24 +92,7 @@ impl Default for ClientBuilder {
     }
 }
 
-/// The FrameQuery API client.
-///
-/// Use [`Client::new`] for quick construction or [`ClientBuilder`] for full control.
-///
-/// # Example
-///
-/// ```no_run
-/// use framequery::Client;
-///
-/// # async fn example() -> framequery::Result<()> {
-/// let client = Client::new("fq_live_abc123");
-///
-/// // Upload and process a video, blocking until complete
-/// let result = client.process("video.mp4", None).await?;
-/// println!("{} scenes detected", result.scenes.len());
-/// # Ok(())
-/// # }
-/// ```
+/// FrameQuery API client. See [`ClientBuilder`] for non-default config.
 pub struct Client {
     base_url: String,
     api_key: String,
@@ -139,9 +101,7 @@ pub struct Client {
 }
 
 impl Client {
-    /// Create a new client with the given API key and default settings.
-    ///
-    /// For customization, use [`ClientBuilder`] instead.
+    /// Create a client with default settings. Panics if the HTTP client can't be built (shouldn't happen).
     pub fn new(api_key: impl Into<String>) -> Self {
         let api_key = api_key.into();
         let http = reqwest::Client::builder()
@@ -157,20 +117,9 @@ impl Client {
         }
     }
 
-    /// Upload a local video file and poll until processing completes.
+    /// Upload a file and poll until done. Wraps [`upload`](Self::upload) + polling.
     ///
-    /// This is the highest-level method: it creates a job, uploads the file to
-    /// the returned signed URL, then polls until the job reaches a terminal
-    /// status. Use [`ProcessOptions`] to configure polling behavior and receive
-    /// progress callbacks.
-    ///
-    /// Returns a [`ProcessingResult`] with scenes, transcript, and metadata.
-    ///
-    /// # Errors
-    ///
-    /// - [`FrameQueryError::Io`] if the file cannot be read.
-    /// - [`FrameQueryError::Timeout`] if polling exceeds the configured timeout.
-    /// - [`FrameQueryError::JobFailed`] if the job reaches `FAILED` status.
+    /// Errors: `Io` (can't read file), `Timeout` (poll exceeded), `JobFailed`.
     pub async fn process(
         &self,
         path: impl AsRef<Path>,
@@ -181,15 +130,9 @@ impl Client {
         self.poll(&job.id, &opts).await
     }
 
-    /// Submit a URL for server-side download and poll until processing completes.
+    /// Submit a URL for server-side download, poll until done. No local upload.
     ///
-    /// The FrameQuery backend will fetch the video from the provided URL directly,
-    /// so there is no local upload step.
-    ///
-    /// # Errors
-    ///
-    /// - [`FrameQueryError::Timeout`] if polling exceeds the configured timeout.
-    /// - [`FrameQueryError::JobFailed`] if the job reaches `FAILED` status.
+    /// Errors: `Timeout`, `JobFailed`.
     pub async fn process_url(
         &self,
         url: &str,
@@ -212,15 +155,8 @@ impl Client {
         self.poll(&resp.data.job_id, &opts).await
     }
 
-    /// Upload a local video file and return immediately with the created [`Job`].
-    ///
-    /// This performs two HTTP calls:
-    /// 1. `POST /jobs` to create the job and obtain a signed upload URL.
-    /// 2. `PUT` the file binary to the signed URL.
-    ///
-    /// The returned [`Job`] will typically be in a non-terminal status. Use
-    /// [`get_job`](Self::get_job) to check progress, or [`process`](Self::process)
-    /// for a fire-and-forget workflow.
+    /// Upload a file and return immediately. Does `POST /jobs` then `PUT`s the bytes
+    /// to the signed URL. The returned `Job` will be in `PENDING_ORCHESTRATION`.
     pub async fn upload(&self, path: impl AsRef<Path>) -> Result<Job> {
         let path = path.as_ref();
 
@@ -270,7 +206,7 @@ impl Client {
         })
     }
 
-    /// Fetch the current state of a job by its identifier.
+    /// `GET /jobs/{job_id}`.
     pub async fn get_job(&self, job_id: &str) -> Result<Job> {
         let resp: GetJobResponse = self
             .request("GET", &format!("/jobs/{job_id}"), None)
@@ -278,13 +214,7 @@ impl Client {
         Ok(job_from_value(resp.data))
     }
 
-    /// List jobs with optional filtering and pagination.
-    ///
-    /// # Parameters
-    ///
-    /// - `limit` — Maximum number of jobs to return per page (default decided by the API).
-    /// - `cursor` — Cursor from a previous [`JobPage::next_cursor`] for pagination.
-    /// - `status` — Filter to only jobs with this status (e.g. `"COMPLETED"`).
+    /// `GET /jobs` with optional `limit`, `cursor`, and `status` filter.
     pub async fn list_jobs(
         &self,
         limit: Option<u32>,
@@ -319,7 +249,7 @@ impl Client {
         })
     }
 
-    /// Retrieve the authenticated user's current quota and billing information.
+    /// `GET /quota`.
     pub async fn get_quota(&self) -> Result<Quota> {
         let resp: GetQuotaResponse = self.request("GET", "/quota", None).await?;
         Ok(resp.data)
@@ -329,14 +259,8 @@ impl Client {
     // Private helpers
     // -----------------------------------------------------------------------
 
-    /// Execute an HTTP request with automatic retry for transient failures.
-    ///
-    /// Retries are performed for:
-    /// - HTTP 5xx server errors
-    /// - HTTP 429 rate-limit responses
-    /// - Network-level errors (connection refused, timeout, etc.)
-    ///
-    /// Exponential backoff is applied: 1s, 2s, 4s, ...
+    /// HTTP request with retry. Retries 5xx, 429, and network errors.
+    /// Backoff: 1s, 2s, 4s, ... capped at 32s.
     async fn request<T: DeserializeOwned>(
         &self,
         method: &str,
@@ -446,7 +370,7 @@ impl Client {
         }))
     }
 
-    /// Poll a job until it reaches a terminal status or the timeout is exceeded.
+    /// Poll until terminal status or timeout.
     async fn poll(&self, job_id: &str, opts: &ProcessOptions) -> Result<ProcessingResult> {
         let deadline = Instant::now() + opts.timeout;
 
