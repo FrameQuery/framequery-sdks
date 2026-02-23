@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+*.whl
+
+# TypeScript / Node
+node_modules/
+dist/
+*.tsbuildinfo
+.turbo/
+
+# Go
+/go/bin/
+
+# Rust
+/rust/target/
+Cargo.lock
+
+# Ruby
+*.gem
+.bundle/
+pkg/
+vendor/bundle/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
