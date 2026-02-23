@@ -2,11 +2,11 @@ name: Ruby SDK
 
 on:
   push:
-    paths: ["ruby/**"]
-    branches: [main]
+    branches: [master]
     tags: ["ruby-v*"]
   pull_request:
     paths: ["ruby/**"]
+  workflow_dispatch:
 
 defaults:
   run:

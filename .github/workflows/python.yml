@@ -2,11 +2,11 @@ name: Python SDK
 
 on:
   push:
-    paths: ["python/**"]
-    branches: [main]
+    branches: [master]
     tags: ["python-v*"]
   pull_request:
     paths: ["python/**"]
+  workflow_dispatch:
 
 defaults:
   run:

@@ -2,11 +2,11 @@ name: Rust SDK
 
 on:
   push:
-    paths: ["rust/**"]
-    branches: [main]
+    branches: [master]
     tags: ["rust-v*"]
   pull_request:
     paths: ["rust/**"]
+  workflow_dispatch:
 
 defaults:
   run:

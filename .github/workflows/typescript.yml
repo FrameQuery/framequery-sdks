@@ -2,11 +2,11 @@ name: TypeScript SDK
 
 on:
   push:
-    paths: ["typescript/**"]
-    branches: [main]
+    branches: [master]
     tags: ["typescript-v*"]
   pull_request:
     paths: ["typescript/**"]
+  workflow_dispatch:
 
 defaults:
   run:
