@@ -2,7 +2,7 @@
 
 Official client libraries for the [FrameQuery](https://framequery.com) video processing API.
 
-Upload videos, process them with AI-powered scene detection and transcription, and retrieve structured results — all behind a single function call.
+Upload videos, process them with AI-powered scene detection and transcription, and retrieve structured results, all behind a single function call.
 
 ## Languages
 
