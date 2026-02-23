@@ -77,7 +77,7 @@ result.scenes.each { |s| puts "[#{s.end_time}s] #{s.description}" }
 
 ## Auth
 
-Grab an API key from the [dashboard](https://app.framequery.com/settings/api-keys). Every SDK also checks `FRAMEQUERY_API_KEY` from the environment:
+Grab an API key from the [dashboard](https://framequery.com/docs). Every SDK also checks `FRAMEQUERY_API_KEY` from the environment:
 
 ```bash
 export FRAMEQUERY_API_KEY=fq_...
