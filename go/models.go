@@ -1,6 +1,9 @@
 package framequery
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Scene is a single detected scene with a description, end timestamp, and tagged objects.
 type Scene struct {
@@ -23,6 +26,29 @@ type ProcessedData struct {
 	Transcript []TranscriptSegment `json:"transcript"`
 }
 
+// AudioTrack describes an additional audio track attached to a job.
+type AudioTrack struct {
+	FileName              string `json:"fileName"`
+	URL                   string `json:"url,omitempty"`
+	DownloadToken         string `json:"downloadToken,omitempty"`
+	SyncMode              string `json:"syncMode,omitempty"`
+	OffsetMs              int    `json:"offsetMs,omitempty"`
+	Label                 string `json:"label,omitempty"`
+	PerChannelTranscription bool `json:"perChannelTranscription,omitempty"`
+	Channels              int    `json:"channels,omitempty"`
+}
+
+// AudioTrackTranscript holds the transcript result for a single audio track.
+type AudioTrackTranscript struct {
+	TrackIndex   int                 `json:"trackIndex"`
+	TrackName    string              `json:"trackName"`
+	Language     string              `json:"language"`
+	Status       string              `json:"status"`
+	Transcript   []TranscriptSegment `json:"transcript"`
+	Speakers     []string            `json:"speakers"`
+	ErrorMessage string              `json:"errorMessage,omitempty"`
+}
+
 // ProcessingResult is returned when a job reaches a terminal success state.
 type ProcessingResult struct {
 	JobID      string
@@ -37,27 +63,30 @@ type ProcessingResult struct {
 
 // Job tracks a video through the processing pipeline. Raw holds the full API response.
 type Job struct {
-	ID         string
-	Status     string
-	Filename   string
-	CreatedAt  string
-	ETASeconds float64
-	Raw        map[string]any
+	ID                   string
+	Status               string
+	Filename             string
+	CreatedAt            string
+	ETASeconds           float64
+	AudioTrackCount      *int
+	AudioTracksCompleted *int
+	AudioTrackNames      []string
+	Raw                  map[string]any
 }
 
-// IsTerminal reports whether the job is done (COMPLETED, COMPLETED_NO_SCENES, or FAILED).
+// IsTerminal reports whether the job is done (VISION_COMPLETED, VIDEO_COMPLETED_NO_SCENES, or any FAILED status).
 func (j *Job) IsTerminal() bool {
-	return j.Status == "COMPLETED" || j.Status == "COMPLETED_NO_SCENES" || j.Status == "FAILED"
+	return j.IsComplete() || j.IsFailed()
 }
 
-// IsComplete reports whether the job finished successfully (COMPLETED or COMPLETED_NO_SCENES).
+// IsComplete reports whether the job finished successfully (VISION_COMPLETED or VIDEO_COMPLETED_NO_SCENES).
 func (j *Job) IsComplete() bool {
-	return j.Status == "COMPLETED" || j.Status == "COMPLETED_NO_SCENES"
+	return j.Status == "VISION_COMPLETED" || j.Status == "VIDEO_COMPLETED_NO_SCENES"
 }
 
-// IsFailed reports whether the job status is FAILED.
+// IsFailed reports whether the job has failed (any status containing "FAILED").
 func (j *Job) IsFailed() bool {
-	return j.Status == "FAILED"
+	return strings.Contains(j.Status, "FAILED")
 }
 
 // Result parses processedData from a completed job.
@@ -74,7 +103,7 @@ func (j *Job) Result() (*ProcessingResult, bool) {
 
 // Quota holds the account's plan, included hours, credit balance, and reset date.
 type Quota struct {
-	Plan                string  `json:"plan"`
+	Plan                string  `json:"currentPlan"`
 	IncludedHours       float64 `json:"includedHours"`
 	CreditsBalanceHours float64 `json:"creditsBalanceHours"`
 	ResetDate           string  `json:"resetDate"`
@@ -94,14 +123,22 @@ func (p *JobPage) HasMore() bool {
 // ProcessOptions tunes polling behavior for Process and ProcessURL.
 // Defaults: 5s poll interval, 24h timeout.
 type ProcessOptions struct {
-	PollInterval time.Duration
-	Timeout      time.Duration
-	OnProgress   func(*Job)
+	PollInterval   time.Duration
+	Timeout        time.Duration
+	OnProgress     func(*Job)
+	CallbackURL    string
+	ProcessingMode string // "all", "transcript", "vision"
+	IdempotencyKey string
+	AudioTracks    []AudioTrack
 }
 
 // UploadOptions overrides the filename derived from the file path.
 type UploadOptions struct {
-	Filename string
+	Filename       string
+	CallbackURL    string
+	ProcessingMode string
+	IdempotencyKey string
+	AudioTracks    []AudioTrack
 }
 
 // ListJobsOptions filters and paginates ListJobs.
@@ -109,6 +146,38 @@ type ListJobsOptions struct {
 	Limit  int
 	Cursor string
 	Status string
+}
+
+// BatchClip is a single video clip in a batch request.
+type BatchClip struct {
+	SourceURL     string `json:"sourceUrl"`
+	FileName      string `json:"fileName,omitempty"`
+	DownloadToken string `json:"downloadToken,omitempty"`
+	Provider      string `json:"provider,omitempty"`
+}
+
+// BatchResult is returned by CreateBatch.
+type BatchResult struct {
+	BatchID string     `json:"batchId"`
+	Mode    string     `json:"mode"`
+	Jobs    []BatchJob `json:"jobs"`
+}
+
+// BatchJob is a single job entry in a BatchResult.
+type BatchJob struct {
+	JobID  string `json:"jobId"`
+	Status string `json:"status"`
+}
+
+// BatchOptions configures CreateBatch and ProcessBatch.
+type BatchOptions struct {
+	Clips          []BatchClip
+	Mode           string // "independent" or "continuous"
+	ProcessingMode string
+	CallbackURL    string
+	PollInterval   time.Duration
+	Timeout        time.Duration
+	OnProgress     func([]Job)
 }
 
 // ---- Internal API response types ----
@@ -131,6 +200,12 @@ type createJobFromURLResponse struct {
 	Status string `json:"status"`
 }
 
+type batchAPIResponse struct {
+	BatchID string     `json:"batchId"`
+	Mode    string     `json:"mode"`
+	Jobs    []BatchJob `json:"jobs"`
+}
+
 func parseJob(data map[string]any) *Job {
 	j := &Job{Raw: data}
 	if v, ok := data["jobId"].(string); ok {
@@ -147,6 +222,21 @@ func parseJob(data map[string]any) *Job {
 	}
 	if v, ok := data["estimatedCompletionTimeSeconds"].(float64); ok {
 		j.ETASeconds = v
+	}
+	if v, ok := data["audioTrackCount"].(float64); ok {
+		n := int(v)
+		j.AudioTrackCount = &n
+	}
+	if v, ok := data["audioTracksCompleted"].(float64); ok {
+		n := int(v)
+		j.AudioTracksCompleted = &n
+	}
+	if names, ok := data["audioTrackNames"].([]any); ok {
+		for _, name := range names {
+			if s, ok := name.(string); ok {
+				j.AudioTrackNames = append(j.AudioTrackNames, s)
+			}
+		}
 	}
 	return j
 }

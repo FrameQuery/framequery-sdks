@@ -18,6 +18,8 @@ from ._constants import (
 )
 from ._errors import FrameQueryError, JobFailedError
 from ._models import (
+    BatchClip,
+    BatchResult,
     Job,
     JobPage,
     ProcessingResult,
@@ -66,9 +68,18 @@ class AsyncFrameQuery:
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         timeout: float = DEFAULT_TIMEOUT,
         on_progress: Optional[Callable[[Job], None]] = None,
+        callback_url: Optional[str] = None,
+        processing_mode: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> ProcessingResult:
         """Upload a video and poll until done."""
-        job = await self.upload(file, filename=filename)
+        job = await self.upload(
+            file,
+            filename=filename,
+            callback_url=callback_url,
+            processing_mode=processing_mode,
+            idempotency_key=idempotency_key,
+        )
         return await self._poll(job.id, poll_interval, timeout, on_progress)
 
     async def process_url(
@@ -79,11 +90,20 @@ class AsyncFrameQuery:
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         timeout: float = DEFAULT_TIMEOUT,
         on_progress: Optional[Callable[[Job], None]] = None,
+        callback_url: Optional[str] = None,
+        processing_mode: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> ProcessingResult:
         """Like ``process()`` but takes a public URL instead of a local file."""
-        body: Dict[str, str] = {"url": url}
+        body: Dict[str, Any] = {"url": url}
         if filename:
             body["fileName"] = filename
+        if callback_url:
+            body["callbackUrl"] = callback_url
+        if processing_mode:
+            body["processingMode"] = processing_mode
+        if idempotency_key:
+            body["idempotencyKey"] = idempotency_key
         data = await self._request("POST", "/jobs/from-url", json=body)
         job = _parse_job(data)
         return await self._poll(job.id, poll_interval, timeout, on_progress)
@@ -93,6 +113,9 @@ class AsyncFrameQuery:
         file: Union[str, Path, BinaryIO],
         *,
         filename: Optional[str] = None,
+        callback_url: Optional[str] = None,
+        processing_mode: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Job:
         """Upload a video and return the Job without polling."""
         if isinstance(file, (str, Path)):
@@ -100,14 +123,23 @@ class AsyncFrameQuery:
             if not path.is_file():
                 raise FileNotFoundError(f"File not found: {path}")
             name = filename or path.name
-            data = await self._request("POST", "/jobs", json={"fileName": name})
-            upload_url = data["uploadUrl"]
-            file_bytes = path.read_bytes()
-            await self._upload_to_signed_url(upload_url, file_bytes)
         else:
             name = filename or "video.mp4"
-            data = await self._request("POST", "/jobs", json={"fileName": name})
-            upload_url = data["uploadUrl"]
+
+        body: Dict[str, Any] = {"fileName": name}
+        if callback_url:
+            body["callbackUrl"] = callback_url
+        if processing_mode:
+            body["processingMode"] = processing_mode
+        if idempotency_key:
+            body["idempotencyKey"] = idempotency_key
+        data = await self._request("POST", "/jobs", json=body)
+        upload_url = data["uploadUrl"]
+
+        if isinstance(file, (str, Path)):
+            file_bytes = Path(file).read_bytes()
+            await self._upload_to_signed_url(upload_url, file_bytes)
+        else:
             content = file.read() if hasattr(file, "read") else file
             await self._upload_to_signed_url(upload_url, content)
 
@@ -137,6 +169,77 @@ class AsyncFrameQuery:
     async def get_quota(self) -> Quota:
         data = await self._request("GET", "/quota")
         return _parse_quota(data)
+
+    async def create_batch(
+        self,
+        clips: list,
+        mode: str = "independent",
+        *,
+        processing_mode: Optional[str] = None,
+        callback_url: Optional[str] = None,
+    ) -> BatchResult:
+        """Submit a batch of URLs for processing. Returns batch metadata without polling."""
+        body: Dict[str, Any] = {
+            "clips": [
+                {k: v for k, v in {
+                    "sourceUrl": c.source_url,
+                    "fileName": c.file_name,
+                    "downloadToken": c.download_token,
+                    "provider": c.provider,
+                }.items() if v is not None}
+                for c in clips
+            ],
+            "mode": mode,
+        }
+        if processing_mode:
+            body["processingMode"] = processing_mode
+        if callback_url:
+            body["callbackUrl"] = callback_url
+        data = await self._request("POST", "/jobs/batch", json=body)
+        return BatchResult(
+            batch_id=str(data.get("batchId", "")),
+            mode=str(data.get("mode", "")),
+            jobs=data.get("jobs", []),
+        )
+
+    async def process_batch(
+        self,
+        clips: list,
+        mode: str = "independent",
+        *,
+        processing_mode: Optional[str] = None,
+        callback_url: Optional[str] = None,
+        poll_interval: float = DEFAULT_POLL_INTERVAL,
+        timeout: float = DEFAULT_TIMEOUT,
+        on_progress: Optional[Callable[[list], None]] = None,
+    ) -> list:
+        """Submit a batch and poll until ALL jobs complete (or first failure)."""
+        import time as _time
+        batch = await self.create_batch(
+            clips, mode,
+            processing_mode=processing_mode,
+            callback_url=callback_url,
+        )
+        job_ids = [j["jobId"] for j in batch.jobs]
+        results: Dict[str, Any] = {}
+        deadline = _time.time() + timeout
+
+        while len(results) < len(job_ids):
+            for job_id in job_ids:
+                if job_id in results:
+                    continue
+                job = await self.get_job(job_id)
+                if job.is_failed:
+                    raise JobFailedError(job_id, str(job.raw.get("errorMessage", "")))
+                if job.is_complete:
+                    results[job_id] = _parse_result(job.raw)
+
+            if len(results) < len(job_ids):
+                if _time.time() > deadline:
+                    raise TimeoutError(f"Batch timed out after {timeout}s")
+                await asyncio.sleep(poll_interval)
+
+        return [results[jid] for jid in job_ids]
 
     async def close(self) -> None:
         await self._client.aclose()

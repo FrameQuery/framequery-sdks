@@ -12,7 +12,7 @@ from ._errors import (
     PermissionDeniedError,
     RateLimitError,
 )
-from ._models import Job, JobPage, ProcessingResult, Quota, Scene, TranscriptSegment
+from ._models import AudioTrack, AudioTrackTranscript, BatchClip, BatchResult, Job, JobPage, ProcessingResult, Quota, Scene, TranscriptSegment
 
 __version__ = VERSION
 
@@ -25,6 +25,10 @@ __all__ = [
     "Job",
     "JobPage",
     "Quota",
+    "AudioTrack",
+    "AudioTrackTranscript",
+    "BatchClip",
+    "BatchResult",
     "FrameQueryError",
     "AuthenticationError",
     "PermissionDeniedError",

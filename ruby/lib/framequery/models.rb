@@ -21,6 +21,51 @@ module FrameQuery
     end
   end
 
+  class AudioTrack
+    attr_reader :file_name, :url, :download_token, :sync_mode, :offset_ms,
+                :label, :per_channel_transcription, :channels
+
+    def initialize(file_name:, url: nil, download_token: nil, sync_mode: nil, offset_ms: nil,
+                   label: nil, per_channel_transcription: nil, channels: nil)
+      @file_name = file_name
+      @url = url
+      @download_token = download_token
+      @sync_mode = sync_mode
+      @offset_ms = offset_ms
+      @label = label
+      @per_channel_transcription = per_channel_transcription
+      @channels = channels
+    end
+
+    def to_h
+      h = { fileName: @file_name }
+      h[:url] = @url if @url
+      h[:downloadToken] = @download_token if @download_token
+      h[:syncMode] = @sync_mode if @sync_mode
+      h[:offsetMs] = @offset_ms if @offset_ms
+      h[:label] = @label if @label
+      h[:perChannelTranscription] = @per_channel_transcription unless @per_channel_transcription.nil?
+      h[:channels] = @channels if @channels
+      h
+    end
+  end
+
+  class AudioTrackTranscript
+    attr_reader :track_index, :track_name, :language, :status, :transcript,
+                :speakers, :error_message
+
+    def initialize(track_index:, track_name:, language:, status:, transcript: [],
+                   speakers: [], error_message: nil)
+      @track_index = track_index
+      @track_name = track_name
+      @language = language
+      @status = status
+      @transcript = transcript
+      @speakers = speakers
+      @error_message = error_message
+    end
+  end
+
   # Returned by #process / #process_url after the job finishes.
   # `raw` holds the full API response if you need fields we don't wrap.
   class ProcessingResult
@@ -39,30 +84,36 @@ module FrameQuery
   end
 
   # Represents a processing job. Status values:
-  #   PENDING_ORCHESTRATION, FFMPEG_PROCESSING, VISION_API_PROCESSING,
-  #   STT_PROCESSING, COMPLETED, COMPLETED_NO_SCENES, FAILED
+  #   PENDING_UPLOAD, PENDING_FETCH, INGEST_PROCESSING, INGEST_TRANSCODING,
+  #   INGEST_COMPLETED, VIDEO_PROCESSING, VIDEO_COMPLETED, VIDEO_COMPLETED_NO_SCENES,
+  #   VISION_PROCESSING, VISION_COMPLETED, FAILED_FETCH, etc.
   class Job
-    attr_reader :id, :status, :filename, :created_at, :eta_seconds, :raw
+    attr_reader :id, :status, :filename, :created_at, :eta_seconds,
+                :audio_track_count, :audio_tracks_completed, :audio_track_names, :raw
 
-    def initialize(id:, status:, filename:, created_at:, eta_seconds: nil, raw: {})
+    def initialize(id:, status:, filename:, created_at:, eta_seconds: nil,
+                   audio_track_count: nil, audio_tracks_completed: nil, audio_track_names: [], raw: {})
       @id = id
       @status = status
       @filename = filename
       @created_at = created_at
       @eta_seconds = eta_seconds
+      @audio_track_count = audio_track_count
+      @audio_tracks_completed = audio_tracks_completed
+      @audio_track_names = audio_track_names
       @raw = raw
     end
 
     def terminal?
-      %w[COMPLETED COMPLETED_NO_SCENES FAILED].include?(@status)
+      complete? || failed?
     end
 
     def complete?
-      %w[COMPLETED COMPLETED_NO_SCENES].include?(@status)
+      %w[VISION_COMPLETED VIDEO_COMPLETED_NO_SCENES].include?(@status)
     end
 
     def failed?
-      @status == "FAILED"
+      @status.include?("FAILED")
     end
 
     # Parses processedData from the raw response. Returns nil unless complete.
@@ -97,6 +148,35 @@ module FrameQuery
     end
   end
 
+  class BatchClip
+    attr_reader :source_url, :file_name, :download_token, :provider
+
+    def initialize(source_url:, file_name: nil, download_token: nil, provider: nil)
+      @source_url = source_url
+      @file_name = file_name
+      @download_token = download_token
+      @provider = provider
+    end
+
+    def to_h
+      h = { sourceUrl: @source_url }
+      h[:fileName] = @file_name if @file_name
+      h[:downloadToken] = @download_token if @download_token
+      h[:provider] = @provider if @provider
+      h
+    end
+  end
+
+  class BatchResult
+    attr_reader :batch_id, :mode, :jobs
+
+    def initialize(batch_id:, mode:, jobs:)
+      @batch_id = batch_id
+      @mode = mode
+      @jobs = jobs
+    end
+  end
+
   # @api private
   module Parsers
     module_function
@@ -108,7 +188,30 @@ module FrameQuery
         filename: data["originalFilename"].to_s,
         created_at: data["createdAt"].to_s,
         eta_seconds: data["estimatedCompletionTimeSeconds"],
+        audio_track_count: data["audioTrackCount"],
+        audio_tracks_completed: data["audioTracksCompleted"],
+        audio_track_names: Array(data["audioTrackNames"]),
         raw: data
+      )
+    end
+
+    def parse_audio_track_transcript(data)
+      transcript = (data["transcript"] || []).map do |t|
+        TranscriptSegment.new(
+          start_time: t["StartTime"].to_f,
+          end_time: t["EndTime"].to_f,
+          text: t["Text"].to_s
+        )
+      end
+
+      AudioTrackTranscript.new(
+        track_index: data["trackIndex"].to_i,
+        track_name: data["trackName"].to_s,
+        language: data["language"].to_s,
+        status: data["status"].to_s,
+        transcript: transcript,
+        speakers: Array(data["speakers"]),
+        error_message: data["errorMessage"]
       )
     end
 
@@ -143,7 +246,7 @@ module FrameQuery
 
     def parse_quota(data)
       Quota.new(
-        plan: data["plan"].to_s,
+        plan: data["currentPlan"].to_s,
         included_hours: data["includedHours"].to_f,
         credits_balance_hours: data["creditsBalanceHours"].to_f,
         reset_date: data["resetDate"]

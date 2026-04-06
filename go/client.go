@@ -79,7 +79,16 @@ func New(apiKey string, opts ...Option) *Client {
 
 // Process uploads a video file from disk and blocks until the job finishes or fails.
 func (c *Client) Process(ctx context.Context, path string, opts *ProcessOptions) (*ProcessingResult, error) {
-	job, err := c.Upload(ctx, path, nil)
+	var uploadOpts *UploadOptions
+	if opts != nil {
+		uploadOpts = &UploadOptions{
+			CallbackURL:    opts.CallbackURL,
+			ProcessingMode: opts.ProcessingMode,
+			IdempotencyKey: opts.IdempotencyKey,
+			AudioTracks:    opts.AudioTracks,
+		}
+	}
+	job, err := c.Upload(ctx, path, uploadOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +97,21 @@ func (c *Client) Process(ctx context.Context, path string, opts *ProcessOptions)
 
 // ProcessURL submits a remote video URL and blocks until the job finishes or fails.
 func (c *Client) ProcessURL(ctx context.Context, videoURL string, opts *ProcessOptions) (*ProcessingResult, error) {
-	body := map[string]string{"url": videoURL}
+	body := map[string]interface{}{"url": videoURL}
+	if opts != nil {
+		if opts.CallbackURL != "" {
+			body["callbackUrl"] = opts.CallbackURL
+		}
+		if opts.ProcessingMode != "" {
+			body["processingMode"] = opts.ProcessingMode
+		}
+		if opts.IdempotencyKey != "" {
+			body["idempotencyKey"] = opts.IdempotencyKey
+		}
+		if len(opts.AudioTracks) > 0 {
+			body["audioTracks"] = opts.AudioTracks
+		}
+	}
 	var resp createJobFromURLResponse
 	if err := c.doJSON(ctx, http.MethodPost, "/jobs/from-url", body, &resp); err != nil {
 		return nil, err
@@ -104,8 +127,23 @@ func (c *Client) Upload(ctx context.Context, path string, opts *UploadOptions) (
 	}
 
 	// Create job
+	body := map[string]interface{}{"fileName": filename}
+	if opts != nil {
+		if opts.CallbackURL != "" {
+			body["callbackUrl"] = opts.CallbackURL
+		}
+		if opts.ProcessingMode != "" {
+			body["processingMode"] = opts.ProcessingMode
+		}
+		if opts.IdempotencyKey != "" {
+			body["idempotencyKey"] = opts.IdempotencyKey
+		}
+		if len(opts.AudioTracks) > 0 {
+			body["audioTracks"] = opts.AudioTracks
+		}
+	}
 	var resp createJobResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/jobs", map[string]string{"fileName": filename}, &resp); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, "/jobs", body, &resp); err != nil {
 		return nil, err
 	}
 
@@ -196,6 +234,126 @@ func (c *Client) GetQuota(ctx context.Context) (*Quota, error) {
 		return nil, err
 	}
 	return &q, nil
+}
+
+// CreateBatch submits a batch of URLs for processing. Returns batch metadata without polling.
+func (c *Client) CreateBatch(ctx context.Context, opts *BatchOptions) (*BatchResult, error) {
+	body := map[string]interface{}{
+		"clips": opts.Clips,
+		"mode":  opts.Mode,
+	}
+	if opts.ProcessingMode != "" {
+		body["processingMode"] = opts.ProcessingMode
+	}
+	if opts.CallbackURL != "" {
+		body["callbackUrl"] = opts.CallbackURL
+	}
+
+	raw, err := c.doJSONRaw(ctx, http.MethodPost, "/jobs/batch", body)
+	if err != nil {
+		return nil, err
+	}
+
+	// Unwrap data envelope
+	dataVal, ok := raw["data"]
+	if !ok {
+		return nil, fmt.Errorf("framequery: missing data in batch response")
+	}
+	b, err := json.Marshal(dataVal)
+	if err != nil {
+		return nil, fmt.Errorf("framequery: marshal batch data: %w", err)
+	}
+	var result batchAPIResponse
+	if err := json.Unmarshal(b, &result); err != nil {
+		return nil, fmt.Errorf("framequery: unmarshal batch data: %w", err)
+	}
+
+	return &BatchResult{
+		BatchID: result.BatchID,
+		Mode:    result.Mode,
+		Jobs:    result.Jobs,
+	}, nil
+}
+
+// ProcessBatch submits a batch and polls until ALL jobs complete or first failure.
+func (c *Client) ProcessBatch(ctx context.Context, opts *BatchOptions) ([]*ProcessingResult, error) {
+	batch, err := c.CreateBatch(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	interval := defaultPollInterval
+	timeout := defaultTimeout
+	if opts.PollInterval > 0 {
+		interval = opts.PollInterval
+	}
+	if opts.Timeout > 0 {
+		timeout = opts.Timeout
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	jobIDs := make([]string, len(batch.Jobs))
+	for i, j := range batch.Jobs {
+		jobIDs[i] = j.JobID
+	}
+
+	results := make(map[string]*ProcessingResult)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for len(results) < len(jobIDs) {
+		for _, jobID := range jobIDs {
+			if _, done := results[jobID]; done {
+				continue
+			}
+			job, err := c.GetJob(ctx, jobID)
+			if err != nil {
+				return nil, err
+			}
+			if job.IsFailed() {
+				msg, _ := job.Raw["errorMessage"].(string)
+				return nil, &Error{Message: fmt.Sprintf("batch job %s failed: %s", jobID, msg)}
+			}
+			if job.IsComplete() {
+				results[jobID] = parseResult(job.Raw)
+			}
+		}
+
+		if len(results) < len(jobIDs) {
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("framequery: batch timed out: %w", ctx.Err())
+			case <-ticker.C:
+			}
+		}
+	}
+
+	ordered := make([]*ProcessingResult, len(jobIDs))
+	for i, id := range jobIDs {
+		ordered[i] = results[id]
+	}
+	return ordered, nil
+}
+
+// GetAudioTracks returns all audio track transcripts for a job.
+func (c *Client) GetAudioTracks(ctx context.Context, jobID string) ([]AudioTrackTranscript, error) {
+	var tracks []AudioTrackTranscript
+	if err := c.doJSON(ctx, http.MethodGet, "/jobs/"+url.PathEscape(jobID)+"/audio-tracks", nil, &tracks); err != nil {
+		return nil, err
+	}
+	return tracks, nil
+}
+
+// GetAudioTrack returns the transcript for a single audio track by index.
+func (c *Client) GetAudioTrack(ctx context.Context, jobID string, trackIndex int) (*AudioTrackTranscript, error) {
+	var track AudioTrackTranscript
+	path := fmt.Sprintf("/jobs/%s/audio-tracks/%d", url.PathEscape(jobID), trackIndex)
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &track); err != nil {
+		return nil, err
+	}
+	return &track, nil
 }
 
 // ---- Private ----

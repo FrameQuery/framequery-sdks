@@ -25,26 +25,39 @@ module FrameQuery
 
     # Upload + poll until done. Pass a block to get progress callbacks.
     # Raises JobFailedError or TimeoutError if things go wrong.
-    def process(file_path, filename: nil, poll_interval: DEFAULT_POLL_INTERVAL, timeout: DEFAULT_TIMEOUT, &on_progress)
-      job = upload(file_path, filename: filename)
+    def process(file_path, filename: nil, poll_interval: DEFAULT_POLL_INTERVAL, timeout: DEFAULT_TIMEOUT,
+                callback_url: nil, processing_mode: nil, idempotency_key: nil, audio_tracks: nil, &on_progress)
+      job = upload(file_path, filename: filename, callback_url: callback_url,
+                   processing_mode: processing_mode, idempotency_key: idempotency_key,
+                   audio_tracks: audio_tracks)
       poll(job.id, poll_interval, timeout, &on_progress)
     end
 
     # Same as #process but takes a public URL instead of a local file.
-    def process_url(url, filename: nil, poll_interval: DEFAULT_POLL_INTERVAL, timeout: DEFAULT_TIMEOUT, &on_progress)
+    def process_url(url, filename: nil, poll_interval: DEFAULT_POLL_INTERVAL, timeout: DEFAULT_TIMEOUT,
+                    callback_url: nil, processing_mode: nil, idempotency_key: nil, audio_tracks: nil, &on_progress)
       body = { url: url }
       body[:fileName] = filename if filename
+      body[:callbackUrl] = callback_url if callback_url
+      body[:processingMode] = processing_mode if processing_mode
+      body[:idempotencyKey] = idempotency_key if idempotency_key
+      body[:audioTracks] = audio_tracks.map(&:to_h) if audio_tracks&.any?
       data = request(:post, "/jobs/from-url", body: body)
       job = Parsers.parse_job(data)
       poll(job.id, poll_interval, timeout, &on_progress)
     end
 
     # Upload only -- returns a Job without polling. Use #get_job later.
-    def upload(file_path, filename: nil)
+    def upload(file_path, filename: nil, callback_url: nil, processing_mode: nil, idempotency_key: nil, audio_tracks: nil)
       raise Errno::ENOENT, file_path unless File.file?(file_path)
 
       name = filename || File.basename(file_path)
-      data = request(:post, "/jobs", body: { fileName: name })
+      body = { fileName: name }
+      body[:callbackUrl] = callback_url if callback_url
+      body[:processingMode] = processing_mode if processing_mode
+      body[:idempotencyKey] = idempotency_key if idempotency_key
+      body[:audioTracks] = audio_tracks.map(&:to_h) if audio_tracks&.any?
+      data = request(:post, "/jobs", body: body)
       upload_url = data["uploadUrl"]
 
       # PUT to the signed GCS URL
@@ -86,6 +99,59 @@ module FrameQuery
     def get_quota
       data = request(:get, "/quota")
       Parsers.parse_quota(data)
+    end
+
+    def get_audio_tracks(job_id)
+      data = request(:get, "/jobs/#{URI.encode_www_form_component(job_id)}/audio-tracks")
+      Array(data).map { |t| Parsers.parse_audio_track_transcript(t) }
+    end
+
+    def get_audio_track(job_id, track_index)
+      data = request(:get, "/jobs/#{URI.encode_www_form_component(job_id)}/audio-tracks/#{track_index}")
+      Parsers.parse_audio_track_transcript(data)
+    end
+
+    def create_batch(clips, mode: "independent", processing_mode: nil, callback_url: nil)
+      body = {
+        clips: clips.map(&:to_h),
+        mode: mode,
+      }
+      body[:processingMode] = processing_mode if processing_mode
+      body[:callbackUrl] = callback_url if callback_url
+      data = request(:post, "/jobs/batch", body: body)
+      BatchResult.new(
+        batch_id: data["batchId"].to_s,
+        mode: data["mode"].to_s,
+        jobs: data["jobs"] || []
+      )
+    end
+
+    def process_batch(clips, mode: "independent", processing_mode: nil, callback_url: nil,
+                      poll_interval: DEFAULT_POLL_INTERVAL, timeout: DEFAULT_TIMEOUT, &on_progress)
+      batch = create_batch(clips, mode: mode, processing_mode: processing_mode, callback_url: callback_url)
+      job_ids = batch.jobs.map { |j| j["jobId"] }
+      results = {}
+      deadline = Time.now + timeout
+
+      while results.size < job_ids.size
+        job_ids.each do |job_id|
+          next if results.key?(job_id)
+          job = get_job(job_id)
+          if job.failed?
+            raise JobFailedError.new(job_id, job.raw["errorMessage"].to_s)
+          end
+          results[job_id] = Parsers.parse_result(job.raw) if job.complete?
+        end
+
+        on_progress&.call(job_ids.map { |jid| get_job(jid) })
+
+        if results.size < job_ids.size
+          raise FrameQuery::TimeoutError, "Batch timed out after #{timeout}s" if Time.now > deadline
+          sleep(poll_interval)
+        end
+      end
+
+      job_ids.map { |jid| results[jid] }
     end
 
     private

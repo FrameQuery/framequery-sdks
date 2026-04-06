@@ -8,6 +8,9 @@ import {
   RateLimitError,
 } from "./errors.js";
 import type {
+  AudioTrackTranscript,
+  BatchOptions,
+  BatchResult,
   FrameQueryOptions,
   Job,
   JobPage,
@@ -62,7 +65,13 @@ export class FrameQuery {
     file: string | Blob | ArrayBuffer | Uint8Array,
     options?: ProcessOptions,
   ): Promise<ProcessingResult> {
-    const job = await this.upload(file, options);
+    const job = await this.upload(file, {
+      filename: options?.filename,
+      signal: options?.signal,
+      callbackUrl: options?.callbackUrl,
+      processingMode: options?.processingMode,
+      idempotencyKey: options?.idempotencyKey,
+    });
     return this.poll(
       job.id,
       options?.pollInterval ?? DEFAULT_POLL_INTERVAL,
@@ -77,8 +86,12 @@ export class FrameQuery {
     url: string,
     options?: ProcessOptions,
   ): Promise<ProcessingResult> {
-    const body: Record<string, string> = { url };
+    const body: Record<string, unknown> = { url };
     if (options?.filename) body.fileName = options.filename;
+    if (options?.callbackUrl) body.callbackUrl = options.callbackUrl;
+    if (options?.processingMode) body.processingMode = options.processingMode;
+    if (options?.idempotencyKey) body.idempotencyKey = options.idempotencyKey;
+    if (options?.audioTracks) body.audioTracks = options.audioTracks;
 
     const data = await this.request<Record<string, unknown>>("POST", "/jobs/from-url", {
       body: JSON.stringify(body),
@@ -112,8 +125,14 @@ export class FrameQuery {
       filename = options?.filename ?? "video.mp4";
     }
 
+    const body: Record<string, unknown> = { fileName: filename };
+    if (options?.callbackUrl) body.callbackUrl = options.callbackUrl;
+    if (options?.processingMode) body.processingMode = options.processingMode;
+    if (options?.idempotencyKey) body.idempotencyKey = options.idempotencyKey;
+    if (options?.audioTracks) body.audioTracks = options.audioTracks;
+
     const data = await this.request<Record<string, unknown>>("POST", "/jobs", {
-      body: JSON.stringify({ fileName: filename }),
+      body: JSON.stringify(body),
     });
 
     const uploadUrl = String(data.uploadUrl);
@@ -141,6 +160,19 @@ export class FrameQuery {
     return parseJob(data);
   }
 
+  /** Get all audio track transcripts for a multi-track job. */
+  async getAudioTracks(jobId: string): Promise<AudioTrackTranscript[]> {
+    const data = await this.request<Record<string, unknown>>("GET", `/jobs/${encodeURIComponent(jobId)}/audioTracks`);
+    const tracks = (data.tracks as Record<string, unknown>[]) ?? [];
+    return tracks.map(parseAudioTrackTranscript);
+  }
+
+  /** Get a single audio track transcript by index. */
+  async getAudioTrack(jobId: string, trackIndex: number): Promise<AudioTrackTranscript> {
+    const data = await this.request<Record<string, unknown>>("GET", `/jobs/${encodeURIComponent(jobId)}/audioTracks/${trackIndex}`);
+    return parseAudioTrackTranscript(data);
+  }
+
   /** Paginated job list. Cursor-based. */
   async listJobs(options?: ListJobsOptions): Promise<JobPage> {
     const params = new URLSearchParams();
@@ -163,6 +195,71 @@ export class FrameQuery {
   async getQuota(): Promise<Quota> {
     const data = await this.request<Record<string, unknown>>("GET", "/quota");
     return parseQuota(data);
+  }
+
+  /** Submit a batch of URLs for processing. Returns batch metadata without polling. */
+  async createBatch(options: BatchOptions): Promise<BatchResult> {
+    const body: Record<string, unknown> = {
+      clips: options.clips,
+      mode: options.mode,
+    };
+    if (options.processingMode) body.processingMode = options.processingMode;
+    if (options.callbackUrl) body.callbackUrl = options.callbackUrl;
+
+    const data = await this.request<Record<string, unknown>>("POST", "/jobs/batch", {
+      body: JSON.stringify(body),
+    });
+    return {
+      batchId: String(data.batchId),
+      mode: String(data.mode),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      jobs: (data.jobs as any[]).map((j: any) => ({
+        jobId: String(j.jobId),
+        status: String(j.status),
+      })),
+    };
+  }
+
+  /** Submit a batch and poll until ALL jobs complete (or first failure). */
+  async processBatch(options: BatchOptions): Promise<ProcessingResult[]> {
+    const batch = await this.createBatch(options);
+    const pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL;
+    const timeout = options.timeout ?? DEFAULT_TIMEOUT;
+    const deadline = Date.now() + timeout;
+    const jobIds = batch.jobs.map((j) => j.jobId);
+    const results = new Map<string, ProcessingResult>();
+
+    while (results.size < jobIds.length) {
+      if (options.signal?.aborted) throw new FrameQueryError("Aborted");
+      if (Date.now() > deadline) {
+        throw new FrameQueryError(`Batch timed out after ${timeout}ms`);
+      }
+
+      for (const jobId of jobIds) {
+        if (results.has(jobId)) continue;
+        const job = await this.getJob(jobId);
+        if (job.isFailed) {
+          const errorMsg = String(
+            (job.raw as Record<string, unknown>).errorMessage ?? "",
+          );
+          throw new JobFailedError(jobId, errorMsg);
+        }
+        if (job.isComplete) {
+          results.set(jobId, parseResult(job.raw));
+        }
+      }
+
+      if (options.onProgress) {
+        const allJobs = await Promise.all(jobIds.map((id) => this.getJob(id)));
+        options.onProgress(allJobs);
+      }
+
+      if (results.size < jobIds.length) {
+        await sleep(pollInterval);
+      }
+    }
+
+    return jobIds.map((id) => results.get(id)!);
   }
 
   // -- internals --

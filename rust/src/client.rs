@@ -8,9 +8,10 @@ use tokio::time::Instant;
 
 use crate::errors::{FrameQueryError, Result};
 use crate::models::{
-    job_from_value, processing_result_from_value, CreateJobFromUrlResponse, CreateJobResponse,
-    GetJobResponse, GetQuotaResponse, Job, JobPage, ListJobsResponse, ProcessOptions,
-    ProcessingResult, Quota,
+    job_from_value, processing_result_from_value, AudioTrackTranscript, BatchAPIResponse,
+    BatchJobEntry, BatchOptions, BatchResult, CreateJobFromUrlResponse, CreateJobResponse,
+    GetAudioTrackResponse, GetAudioTracksResponse, GetJobResponse, GetQuotaResponse, Job, JobPage,
+    ListJobsResponse, ProcessOptions, ProcessingResult, Quota,
 };
 
 const DEFAULT_BASE_URL: &str = "https://api.framequery.com/v1/api";
@@ -125,7 +126,7 @@ impl Client {
         path: impl AsRef<Path>,
         opts: Option<ProcessOptions>,
     ) -> Result<ProcessingResult> {
-        let job = self.upload(path).await?;
+        let job = self.upload(path, opts.as_ref()).await?;
         let opts = opts.unwrap_or_default();
         self.poll(&job.id, &opts).await
     }
@@ -145,10 +146,25 @@ impl Client {
             .filter(|s| !s.is_empty() && s.contains('.'))
             .unwrap_or("video.mp4");
 
-        let body = json!({
+        let mut body = json!({
             "url": url,
             "fileName": file_name,
         });
+
+        if let Some(ref o) = opts {
+            if let Some(ref cb) = o.callback_url {
+                body["callbackUrl"] = json!(cb);
+            }
+            if let Some(ref mode) = o.processing_mode {
+                body["processingMode"] = json!(mode);
+            }
+            if let Some(ref key) = o.idempotency_key {
+                body["idempotencyKey"] = json!(key);
+            }
+            if let Some(ref tracks) = o.audio_tracks {
+                body["audioTracks"] = json!(tracks);
+            }
+        }
 
         let resp: CreateJobFromUrlResponse =
             self.request("POST", "/jobs/from-url", Some(body)).await?;
@@ -157,8 +173,8 @@ impl Client {
     }
 
     /// Upload a file and return immediately. Does `POST /jobs` then `PUT`s the bytes
-    /// to the signed URL. The returned `Job` will be in `PENDING_ORCHESTRATION`.
-    pub async fn upload(&self, path: impl AsRef<Path>) -> Result<Job> {
+    /// to the signed URL. The returned `Job` will be in `PENDING_UPLOAD`.
+    pub async fn upload(&self, path: impl AsRef<Path>, opts: Option<&ProcessOptions>) -> Result<Job> {
         let path = path.as_ref();
 
         // Validate the file exists and read it into memory.
@@ -170,7 +186,21 @@ impl Client {
         let file_bytes = tokio::fs::read(path).await.map_err(FrameQueryError::Io)?;
 
         // Step 1: Create the job.
-        let body = json!({ "fileName": file_name });
+        let mut body = json!({ "fileName": file_name });
+        if let Some(o) = opts {
+            if let Some(ref url) = o.callback_url {
+                body["callbackUrl"] = json!(url);
+            }
+            if let Some(ref mode) = o.processing_mode {
+                body["processingMode"] = json!(mode);
+            }
+            if let Some(ref key) = o.idempotency_key {
+                body["idempotencyKey"] = json!(key);
+            }
+            if let Some(ref tracks) = o.audio_tracks {
+                body["audioTracks"] = json!(tracks);
+            }
+        }
         let resp: CreateJobResponse = self.request("POST", "/jobs", Some(body)).await?;
 
         // Step 2: Upload file to signed URL.
@@ -196,13 +226,16 @@ impl Client {
         // Return a Job struct representing the freshly created job.
         Ok(Job {
             id: resp.data.job_id.clone(),
-            status: "PENDING_ORCHESTRATION".to_string(),
+            status: "PENDING_UPLOAD".to_string(),
             filename: file_name,
             created_at: String::new(),
             eta_seconds: None,
+            audio_track_count: None,
+            audio_tracks_completed: None,
+            audio_track_names: Vec::new(),
             raw: json!({
                 "jobId": resp.data.job_id,
-                "status": "PENDING_ORCHESTRATION",
+                "status": "PENDING_UPLOAD",
             }),
         })
     }
@@ -254,6 +287,115 @@ impl Client {
     pub async fn get_quota(&self) -> Result<Quota> {
         let resp: GetQuotaResponse = self.request("GET", "/quota", None).await?;
         Ok(resp.data)
+    }
+
+    /// `GET /jobs/{job_id}/audio-tracks` -- retrieve all audio track transcripts.
+    pub async fn get_audio_tracks(&self, job_id: &str) -> Result<Vec<AudioTrackTranscript>> {
+        let resp: GetAudioTracksResponse = self
+            .request("GET", &format!("/jobs/{job_id}/audio-tracks"), None)
+            .await?;
+        Ok(resp.data)
+    }
+
+    /// `GET /jobs/{job_id}/audio-tracks/{track_index}` -- retrieve a single audio track transcript.
+    pub async fn get_audio_track(
+        &self,
+        job_id: &str,
+        track_index: u32,
+    ) -> Result<AudioTrackTranscript> {
+        let resp: GetAudioTrackResponse = self
+            .request(
+                "GET",
+                &format!("/jobs/{job_id}/audio-tracks/{track_index}"),
+                None,
+            )
+            .await?;
+        Ok(resp.data)
+    }
+
+    /// `POST /jobs/batch` -- submit multiple clips at once.
+    pub async fn create_batch(&self, opts: &BatchOptions) -> Result<BatchResult> {
+        let clips: Vec<serde_json::Value> = opts
+            .clips
+            .iter()
+            .map(|c| {
+                let mut clip = json!({ "sourceUrl": c.source_url });
+                if let Some(ref name) = c.file_name {
+                    clip["fileName"] = json!(name);
+                }
+                if let Some(ref token) = c.download_token {
+                    clip["downloadToken"] = json!(token);
+                }
+                if let Some(ref prov) = c.provider {
+                    clip["provider"] = json!(prov);
+                }
+                clip
+            })
+            .collect();
+
+        let mut body = json!({ "clips": clips, "mode": opts.mode });
+        if let Some(ref pm) = opts.processing_mode {
+            body["processingMode"] = json!(pm);
+        }
+        if let Some(ref cb) = opts.callback_url {
+            body["callbackUrl"] = json!(cb);
+        }
+
+        let resp: BatchAPIResponse = self.request("POST", "/jobs/batch", Some(body)).await?;
+        Ok(BatchResult {
+            batch_id: resp.data.batch_id,
+            mode: resp.data.mode,
+            jobs: resp
+                .data
+                .jobs
+                .into_iter()
+                .map(|j| BatchJobEntry {
+                    job_id: j.job_id,
+                    status: j.status,
+                })
+                .collect(),
+        })
+    }
+
+    /// Submit a batch then poll all jobs until every one completes (or one fails).
+    pub async fn process_batch(&self, opts: BatchOptions) -> Result<Vec<ProcessingResult>> {
+        let batch = self.create_batch(&opts).await?;
+        let deadline = Instant::now() + opts.timeout;
+        let job_ids: Vec<String> = batch.jobs.iter().map(|j| j.job_id.clone()).collect();
+        let mut results: std::collections::HashMap<String, ProcessingResult> =
+            std::collections::HashMap::new();
+
+        loop {
+            for job_id in &job_ids {
+                if results.contains_key(job_id) {
+                    continue;
+                }
+                let job = self.get_job(job_id).await?;
+                if job.is_failed() {
+                    return Err(FrameQueryError::JobFailed(format!(
+                        "batch job {} failed",
+                        job_id
+                    )));
+                }
+                if job.is_complete() {
+                    results.insert(job_id.clone(), processing_result_from_value(job.raw));
+                }
+            }
+
+            if results.len() >= job_ids.len() {
+                break;
+            }
+
+            if Instant::now() >= deadline {
+                return Err(FrameQueryError::Timeout(opts.timeout));
+            }
+            tokio::time::sleep(opts.poll_interval).await;
+        }
+
+        Ok(job_ids
+            .iter()
+            .map(|id| results.remove(id).unwrap())
+            .collect())
     }
 
     // -----------------------------------------------------------------------

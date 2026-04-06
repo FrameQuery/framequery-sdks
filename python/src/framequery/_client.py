@@ -18,10 +18,15 @@ from ._constants import (
 )
 from ._errors import FrameQueryError, JobFailedError
 from ._models import (
+    AudioTrack,
+    AudioTrackTranscript,
+    BatchClip,
+    BatchResult,
     Job,
     JobPage,
     ProcessingResult,
     Quota,
+    _parse_audio_track_transcript,
     _parse_job,
     _parse_quota,
     _parse_result,
@@ -66,6 +71,9 @@ class FrameQuery:
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         timeout: float = DEFAULT_TIMEOUT,
         on_progress: Optional[Callable[[Job], None]] = None,
+        callback_url: Optional[str] = None,
+        processing_mode: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> ProcessingResult:
         """Upload a video and poll until done.
 
@@ -73,7 +81,13 @@ class FrameQuery:
         seconds (default 5) up to ``timeout`` seconds (default 24h). Pass
         ``on_progress`` to get the Job on each poll tick.
         """
-        job = self.upload(file, filename=filename)
+        job = self.upload(
+            file,
+            filename=filename,
+            callback_url=callback_url,
+            processing_mode=processing_mode,
+            idempotency_key=idempotency_key,
+        )
         return self._poll(job.id, poll_interval, timeout, on_progress)
 
     def process_url(
@@ -84,11 +98,31 @@ class FrameQuery:
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         timeout: float = DEFAULT_TIMEOUT,
         on_progress: Optional[Callable[[Job], None]] = None,
+        callback_url: Optional[str] = None,
+        processing_mode: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+        audio_tracks: Optional[list[AudioTrack]] = None,
     ) -> ProcessingResult:
         """Like ``process()`` but takes a public URL instead of a local file."""
-        body: Dict[str, str] = {"url": url}
+        body: Dict[str, Any] = {"url": url}
         if filename:
             body["fileName"] = filename
+        if callback_url:
+            body["callbackUrl"] = callback_url
+        if processing_mode:
+            body["processingMode"] = processing_mode
+        if idempotency_key:
+            body["idempotencyKey"] = idempotency_key
+        if audio_tracks:
+            body["audioTracks"] = [
+                {k: v for k, v in {
+                    "url": t.url, "downloadToken": t.download_token,
+                    "syncMode": t.sync_mode, "offsetMs": t.offset_ms, "label": t.label,
+                    "perChannelTranscription": t.per_channel_transcription or None,
+                    "channels": t.channels,
+                }.items() if v is not None}
+                for t in audio_tracks
+            ]
         data = self._request("POST", "/jobs/from-url", json=body)
         job = _parse_job(data)
         return self._poll(job.id, poll_interval, timeout, on_progress)
@@ -98,6 +132,10 @@ class FrameQuery:
         file: Union[str, Path, BinaryIO],
         *,
         filename: Optional[str] = None,
+        callback_url: Optional[str] = None,
+        processing_mode: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+        audio_tracks: Optional[list[AudioTrack]] = None,
     ) -> Job:
         """Upload a video and return the Job without polling.
 
@@ -108,14 +146,34 @@ class FrameQuery:
             if not path.is_file():
                 raise FileNotFoundError(f"File not found: {path}")
             name = filename or path.name
-            data = self._request("POST", "/jobs", json={"fileName": name})
-            upload_url = data["uploadUrl"]
-            with path.open("rb") as fh:
-                self._upload_to_signed_url(upload_url, fh)
         else:
             name = filename or "video.mp4"
-            data = self._request("POST", "/jobs", json={"fileName": name})
-            upload_url = data["uploadUrl"]
+
+        body: Dict[str, Any] = {"fileName": name}
+        if callback_url:
+            body["callbackUrl"] = callback_url
+        if processing_mode:
+            body["processingMode"] = processing_mode
+        if idempotency_key:
+            body["idempotencyKey"] = idempotency_key
+        if audio_tracks:
+            body["audioTracks"] = [
+                {k: v for k, v in {
+                    "fileName": t.file_name, "url": t.url, "downloadToken": t.download_token,
+                    "syncMode": t.sync_mode, "offsetMs": t.offset_ms, "label": t.label,
+                    "perChannelTranscription": t.per_channel_transcription or None,
+                    "channels": t.channels,
+                }.items() if v is not None}
+                for t in audio_tracks
+            ]
+
+        data = self._request("POST", "/jobs", json=body)
+        upload_url = data["uploadUrl"]
+
+        if isinstance(file, (str, Path)):
+            with Path(file).open("rb") as fh:
+                self._upload_to_signed_url(upload_url, fh)
+        else:
             self._upload_to_signed_url(upload_url, file)
 
         return _parse_job(data)
@@ -123,6 +181,17 @@ class FrameQuery:
     def get_job(self, job_id: str) -> Job:
         data = self._request("GET", f"/jobs/{job_id}")
         return _parse_job(data)
+
+    def get_audio_tracks(self, job_id: str) -> list[AudioTrackTranscript]:
+        """Get all audio track transcripts for a multi-track job."""
+        data = self._request("GET", f"/jobs/{job_id}/audioTracks")
+        tracks = data.get("tracks", [])
+        return [_parse_audio_track_transcript(t) for t in tracks]
+
+    def get_audio_track(self, job_id: str, track_index: int) -> AudioTrackTranscript:
+        """Get a single audio track transcript by index."""
+        data = self._request("GET", f"/jobs/{job_id}/audioTracks/{track_index}")
+        return _parse_audio_track_transcript(data)
 
     def list_jobs(
         self,
@@ -144,6 +213,81 @@ class FrameQuery:
     def get_quota(self) -> Quota:
         data = self._request("GET", "/quota")
         return _parse_quota(data)
+
+    def create_batch(
+        self,
+        clips: list,
+        mode: str = "independent",
+        *,
+        processing_mode: Optional[str] = None,
+        callback_url: Optional[str] = None,
+    ) -> BatchResult:
+        """Submit a batch of URLs for processing. Returns batch metadata without polling."""
+        body: Dict[str, Any] = {
+            "clips": [
+                {k: v for k, v in {
+                    "sourceUrl": c.source_url,
+                    "fileName": c.file_name,
+                    "downloadToken": c.download_token,
+                    "provider": c.provider,
+                }.items() if v is not None}
+                for c in clips
+            ],
+            "mode": mode,
+        }
+        if processing_mode:
+            body["processingMode"] = processing_mode
+        if callback_url:
+            body["callbackUrl"] = callback_url
+        data = self._request("POST", "/jobs/batch", json=body)
+        return BatchResult(
+            batch_id=str(data.get("batchId", "")),
+            mode=str(data.get("mode", "")),
+            jobs=data.get("jobs", []),
+        )
+
+    def process_batch(
+        self,
+        clips: list,
+        mode: str = "independent",
+        *,
+        processing_mode: Optional[str] = None,
+        callback_url: Optional[str] = None,
+        poll_interval: float = DEFAULT_POLL_INTERVAL,
+        timeout: float = DEFAULT_TIMEOUT,
+        on_progress: Optional[Callable[[list], None]] = None,
+    ) -> list:
+        """Submit a batch and poll until ALL jobs complete (or first failure)."""
+        batch = self.create_batch(
+            clips, mode,
+            processing_mode=processing_mode,
+            callback_url=callback_url,
+        )
+        job_ids = [j["jobId"] for j in batch.jobs]
+        results: Dict[str, ProcessingResult] = {}
+        deadline = time.time() + timeout
+
+        while len(results) < len(job_ids):
+            for job_id in job_ids:
+                if job_id in results:
+                    continue
+                job = self.get_job(job_id)
+                if job.is_failed:
+                    raise JobFailedError(job_id, str(job.raw.get("errorMessage", "")))
+                if job.is_complete:
+                    results[job_id] = _parse_result(job.raw)
+
+            if on_progress:
+                on_progress([self.get_job(jid) for jid in job_ids])
+
+            if len(results) < len(job_ids):
+                if time.time() > deadline:
+                    raise TimeoutError(
+                        f"Batch timed out after {timeout}s"
+                    )
+                time.sleep(poll_interval)
+
+        return [results[jid] for jid in job_ids]
 
     def close(self) -> None:
         self._client.close()

@@ -24,4 +24,7 @@ mod models;
 
 pub use client::{Client, ClientBuilder};
 pub use errors::{FrameQueryError, Result};
-pub use models::{Job, JobPage, ProcessOptions, ProcessingResult, Quota, Scene, TranscriptSegment};
+pub use models::{
+    AudioTrack, AudioTrackTranscript, BatchClip, BatchJobEntry, BatchOptions, BatchResult, Job,
+    JobPage, ProcessOptions, ProcessingResult, Quota, Scene, TranscriptSegment,
+};

@@ -19,4 +19,9 @@ export type {
   ProcessOptions,
   UploadOptions,
   ListJobsOptions,
+  BatchClip,
+  BatchOptions,
+  BatchResult,
+  AudioTrack,
+  AudioTrackTranscript,
 } from "./models.js";
