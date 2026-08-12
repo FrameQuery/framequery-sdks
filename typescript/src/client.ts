@@ -20,7 +20,7 @@ import type {
   Quota,
   UploadOptions,
 } from "./models.js";
-import { parseJob, parseQuota, parseResult } from "./models.js";
+import { parseAudioTrackTranscript, parseJob, parseQuota, parseResult } from "./models.js";
 
 const DEFAULT_BASE_URL = "https://api.framequery.com/v1/api";
 const DEFAULT_POLL_INTERVAL = 5_000;

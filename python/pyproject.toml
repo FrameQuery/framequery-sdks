@@ -22,13 +22,13 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Video",
 ]
-dependencies = ["httpx>=0.25"]
+dependencies = ["httpx>=0.25", "typing_extensions>=4.6"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio", "respx>=0.21", "ruff", "mypy"]
 
 [project.urls]
-Homepage = "https://github.com/framequery/framequery-sdks"
+Homepage = "https://framequery.com"
 Documentation = "https://github.com/framequery/framequery-sdks/tree/main/python"
 Repository = "https://github.com/framequery/framequery-sdks"
 
@@ -40,5 +40,4 @@ target-version = "py39"
 line-length = 100
 
 [tool.mypy]
-python_version = "3.9"
 strict = true

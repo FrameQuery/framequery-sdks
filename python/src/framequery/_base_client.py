@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 import httpx
 
@@ -13,7 +13,7 @@ from ._errors import (
 )
 
 
-def build_headers(api_key: str, user_agent: str) -> Dict[str, str]:
+def build_headers(api_key: str, user_agent: str) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {api_key}",
         "User-Agent": user_agent,
@@ -39,7 +39,7 @@ def handle_response(response: httpx.Response) -> Any:
             msg = body.get("error") or body.get("message")
             if msg:
                 message = str(msg)
-    except Exception:
+    except ValueError:
         text = response.text
         if text:
             message = text

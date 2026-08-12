@@ -3,9 +3,10 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from typing import Any, BinaryIO, Callable, Dict, Optional, Union
+from typing import Any, BinaryIO, Callable
 
 import httpx
+from typing_extensions import Self
 
 from ._base_client import build_headers, handle_response
 from ._constants import (
@@ -44,7 +45,7 @@ class FrameQuery:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = DEFAULT_HTTP_TIMEOUT,
         max_retries: int = DEFAULT_MAX_RETRIES,
@@ -65,15 +66,15 @@ class FrameQuery:
 
     def process(
         self,
-        file: Union[str, Path, BinaryIO],
+        file: str | Path | BinaryIO,
         *,
-        filename: Optional[str] = None,
+        filename: str | None = None,
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         timeout: float = DEFAULT_TIMEOUT,
-        on_progress: Optional[Callable[[Job], None]] = None,
-        callback_url: Optional[str] = None,
-        processing_mode: Optional[str] = None,
-        idempotency_key: Optional[str] = None,
+        on_progress: Callable[[Job], None] | None = None,
+        callback_url: str | None = None,
+        processing_mode: str | None = None,
+        idempotency_key: str | None = None,
     ) -> ProcessingResult:
         """Upload a video and poll until done.
 
@@ -94,17 +95,17 @@ class FrameQuery:
         self,
         url: str,
         *,
-        filename: Optional[str] = None,
+        filename: str | None = None,
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         timeout: float = DEFAULT_TIMEOUT,
-        on_progress: Optional[Callable[[Job], None]] = None,
-        callback_url: Optional[str] = None,
-        processing_mode: Optional[str] = None,
-        idempotency_key: Optional[str] = None,
-        audio_tracks: Optional[list[AudioTrack]] = None,
+        on_progress: Callable[[Job], None] | None = None,
+        callback_url: str | None = None,
+        processing_mode: str | None = None,
+        idempotency_key: str | None = None,
+        audio_tracks: list[AudioTrack] | None = None,
     ) -> ProcessingResult:
         """Like ``process()`` but takes a public URL instead of a local file."""
-        body: Dict[str, Any] = {"url": url}
+        body: dict[str, Any] = {"url": url}
         if filename:
             body["fileName"] = filename
         if callback_url:
@@ -129,13 +130,13 @@ class FrameQuery:
 
     def upload(
         self,
-        file: Union[str, Path, BinaryIO],
+        file: str | Path | BinaryIO,
         *,
-        filename: Optional[str] = None,
-        callback_url: Optional[str] = None,
-        processing_mode: Optional[str] = None,
-        idempotency_key: Optional[str] = None,
-        audio_tracks: Optional[list[AudioTrack]] = None,
+        filename: str | None = None,
+        callback_url: str | None = None,
+        processing_mode: str | None = None,
+        idempotency_key: str | None = None,
+        audio_tracks: list[AudioTrack] | None = None,
     ) -> Job:
         """Upload a video and return the Job without polling.
 
@@ -149,7 +150,7 @@ class FrameQuery:
         else:
             name = filename or "video.mp4"
 
-        body: Dict[str, Any] = {"fileName": name}
+        body: dict[str, Any] = {"fileName": name}
         if callback_url:
             body["callbackUrl"] = callback_url
         if processing_mode:
@@ -197,10 +198,10 @@ class FrameQuery:
         self,
         *,
         limit: int = 20,
-        cursor: Optional[str] = None,
-        status: Optional[str] = None,
+        cursor: str | None = None,
+        status: str | None = None,
     ) -> JobPage:
-        params: Dict[str, Any] = {"limit": limit}
+        params: dict[str, Any] = {"limit": limit}
         if cursor:
             params["cursor"] = cursor
         if status:
@@ -216,14 +217,14 @@ class FrameQuery:
 
     def create_batch(
         self,
-        clips: list,
+        clips: list[BatchClip],
         mode: str = "independent",
         *,
-        processing_mode: Optional[str] = None,
-        callback_url: Optional[str] = None,
+        processing_mode: str | None = None,
+        callback_url: str | None = None,
     ) -> BatchResult:
         """Submit a batch of URLs for processing. Returns batch metadata without polling."""
-        body: Dict[str, Any] = {
+        body: dict[str, Any] = {
             "clips": [
                 {k: v for k, v in {
                     "sourceUrl": c.source_url,
@@ -248,15 +249,15 @@ class FrameQuery:
 
     def process_batch(
         self,
-        clips: list,
+        clips: list[BatchClip],
         mode: str = "independent",
         *,
-        processing_mode: Optional[str] = None,
-        callback_url: Optional[str] = None,
+        processing_mode: str | None = None,
+        callback_url: str | None = None,
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         timeout: float = DEFAULT_TIMEOUT,
-        on_progress: Optional[Callable[[list], None]] = None,
-    ) -> list:
+        on_progress: Callable[[list[Job]], None] | None = None,
+    ) -> list[ProcessingResult]:
         """Submit a batch and poll until ALL jobs complete (or first failure)."""
         batch = self.create_batch(
             clips, mode,
@@ -264,7 +265,7 @@ class FrameQuery:
             callback_url=callback_url,
         )
         job_ids = [j["jobId"] for j in batch.jobs]
-        results: Dict[str, ProcessingResult] = {}
+        results: dict[str, ProcessingResult] = {}
         deadline = time.time() + timeout
 
         while len(results) < len(job_ids):
@@ -292,10 +293,10 @@ class FrameQuery:
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> "FrameQuery":
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         self.close()
 
     # ---- Private ----
@@ -304,7 +305,7 @@ class FrameQuery:
         resp = self._do_request(method, path, **kwargs)
         return handle_response(resp)
 
-    def _request_raw(self, method: str, path: str, **kwargs: Any) -> Dict[str, Any]:
+    def _request_raw(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         resp = self._do_request(method, path, **kwargs)
         if not resp.is_success:
             handle_response(resp)  # raises
@@ -313,7 +314,7 @@ class FrameQuery:
     def _do_request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         """Retries on 5xx, 429, and transport errors with exponential backoff."""
         url = f"{self._base_url}{path}"
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
 
         for attempt in range(self._max_retries + 1):
             try:
@@ -355,7 +356,7 @@ class FrameQuery:
         job_id: str,
         poll_interval: float,
         timeout: float,
-        on_progress: Optional[Callable[[Job], None]],
+        on_progress: Callable[[Job], None] | None,
     ) -> ProcessingResult:
         deadline = time.time() + timeout
         interval = poll_interval
@@ -387,7 +388,7 @@ class FrameQuery:
             time.sleep(interval)
 
 
-def _backoff_delay(attempt: int, response: Optional[httpx.Response] = None) -> float:
+def _backoff_delay(attempt: int, response: httpx.Response | None = None) -> float:
     # 0.5s, 1s, 2s, ... capped at 30s. Honors Retry-After header.
     if response is not None:
         ra = response.headers.get("Retry-After")

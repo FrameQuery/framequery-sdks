@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
 class Scene:
     description: str
     end_time: float
-    objects: List[str] = field(default_factory=list)
+    objects: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -30,10 +30,10 @@ class ProcessingResult:
     status: str
     filename: str
     duration: float
-    scenes: List[Scene]
-    transcript: List[TranscriptSegment]
+    scenes: list[Scene]
+    transcript: list[TranscriptSegment]
     created_at: str
-    raw: Dict[str, Any]
+    raw: dict[str, Any]
 
 
 @dataclass
@@ -44,11 +44,11 @@ class Job:
     status: str
     filename: str
     created_at: str
-    eta_seconds: Optional[float]
-    raw: Dict[str, Any]
-    audio_track_count: Optional[int] = None
-    audio_tracks_completed: Optional[int] = None
-    audio_track_names: Optional[List[str]] = None
+    eta_seconds: float | None
+    raw: dict[str, Any]
+    audio_track_count: int | None = None
+    audio_tracks_completed: int | None = None
+    audio_track_names: list[str] | None = None
 
     @property
     def is_terminal(self) -> bool:
@@ -63,7 +63,7 @@ class Job:
         return "FAILED" in self.status
 
     @property
-    def result(self) -> Optional["ProcessingResult"]:
+    def result(self) -> ProcessingResult | None:
         """Parsed processing result, or None if the job hasn't completed."""
         if not self.is_complete:
             return None
@@ -75,13 +75,13 @@ class Quota:
     plan: str
     included_hours: float
     credits_balance_hours: float
-    reset_date: Optional[str]
+    reset_date: str | None
 
 
 @dataclass
 class JobPage:
-    jobs: List[Job]
-    next_cursor: Optional[str]
+    jobs: list[Job]
+    next_cursor: str | None
 
     @property
     def has_more(self) -> bool:
@@ -92,14 +92,14 @@ class JobPage:
 class AudioTrack:
     """A single audio track for multi-track processing."""
 
-    file_name: Optional[str] = None
-    url: Optional[str] = None
-    download_token: Optional[str] = None
-    sync_mode: Optional[str] = None
-    offset_ms: Optional[int] = None
-    label: Optional[str] = None
+    file_name: str | None = None
+    url: str | None = None
+    download_token: str | None = None
+    sync_mode: str | None = None
+    offset_ms: int | None = None
+    label: str | None = None
     per_channel_transcription: bool = False
-    channels: Optional[List[int]] = None
+    channels: list[int] | None = None
 
 
 @dataclass(frozen=True)
@@ -110,9 +110,9 @@ class AudioTrackTranscript:
     track_name: str
     language: str
     status: str
-    transcript: List[TranscriptSegment]
-    speakers: Optional[List[str]] = None
-    error_message: Optional[str] = None
+    transcript: list[TranscriptSegment]
+    speakers: list[str] | None = None
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -120,9 +120,9 @@ class BatchClip:
     """A single clip in a batch request."""
 
     source_url: str
-    file_name: Optional[str] = None
-    download_token: Optional[str] = None
-    provider: Optional[str] = None
+    file_name: str | None = None
+    download_token: str | None = None
+    provider: str | None = None
 
 
 @dataclass(frozen=True)
@@ -131,10 +131,10 @@ class BatchResult:
 
     batch_id: str
     mode: str
-    jobs: List[Dict[str, str]]
+    jobs: list[dict[str, str]]
 
 
-def _parse_scene(data: Dict[str, Any]) -> Scene:
+def _parse_scene(data: dict[str, Any]) -> Scene:
     return Scene(
         description=str(data.get("description", "")),
         end_time=float(data.get("endTs", 0.0)),
@@ -142,7 +142,7 @@ def _parse_scene(data: Dict[str, Any]) -> Scene:
     )
 
 
-def _parse_transcript_segment(data: Dict[str, Any]) -> TranscriptSegment:
+def _parse_transcript_segment(data: dict[str, Any]) -> TranscriptSegment:
     return TranscriptSegment(
         start_time=float(data.get("StartTime", 0.0)),
         end_time=float(data.get("EndTime", 0.0)),
@@ -150,7 +150,7 @@ def _parse_transcript_segment(data: Dict[str, Any]) -> TranscriptSegment:
     )
 
 
-def _parse_job(data: Dict[str, Any]) -> Job:
+def _parse_job(data: dict[str, Any]) -> Job:
     return Job(
         id=str(data.get("jobId", "")),
         status=str(data.get("status", "")),
@@ -164,7 +164,7 @@ def _parse_job(data: Dict[str, Any]) -> Job:
     )
 
 
-def _parse_audio_track_transcript(data: Dict[str, Any]) -> AudioTrackTranscript:
+def _parse_audio_track_transcript(data: dict[str, Any]) -> AudioTrackTranscript:
     transcript_raw = data.get("transcript") or []
     return AudioTrackTranscript(
         track_index=int(data.get("trackIndex", 0)),
@@ -177,7 +177,7 @@ def _parse_audio_track_transcript(data: Dict[str, Any]) -> AudioTrackTranscript:
     )
 
 
-def _parse_result(data: Dict[str, Any]) -> ProcessingResult:
+def _parse_result(data: dict[str, Any]) -> ProcessingResult:
     processed = data.get("processedData") or {}
     scenes_raw = processed.get("scenes") or []
     transcript_raw = processed.get("transcript") or []
@@ -194,7 +194,7 @@ def _parse_result(data: Dict[str, Any]) -> ProcessingResult:
     )
 
 
-def _parse_quota(data: Dict[str, Any]) -> Quota:
+def _parse_quota(data: dict[str, Any]) -> Quota:
     return Quota(
         plan=str(data.get("currentPlan", "")),
         included_hours=float(data.get("includedHours", 0.0)),

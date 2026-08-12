@@ -1,6 +1,6 @@
 //! FRAMEQUERY_API_KEY=fq_live_... cargo run --example quickstart
 
-use framequery::{Client, ClientBuilder, ProcessOptions};
+use framequery::{ClientBuilder, ProcessOptions};
 use std::time::Duration;
 
 #[tokio::main]
@@ -63,6 +63,7 @@ async fn main() -> framequery::Result<()> {
             }
             println!();
         })),
+        ..Default::default()
     };
 
     let result = client
@@ -79,7 +80,7 @@ async fn main() -> framequery::Result<()> {
     // -----------------------------------------------------------------------
     // 5. Upload without waiting (fire-and-forget)
     // -----------------------------------------------------------------------
-    let job = client.upload("another_video.mp4").await?;
+    let job = client.upload("another_video.mp4", None).await?;
     println!("Uploaded! Job ID: {} (status: {})", job.id, job.status);
 
     // Check it later:

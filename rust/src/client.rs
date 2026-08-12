@@ -174,7 +174,11 @@ impl Client {
 
     /// Upload a file and return immediately. Does `POST /jobs` then `PUT`s the bytes
     /// to the signed URL. The returned `Job` will be in `PENDING_UPLOAD`.
-    pub async fn upload(&self, path: impl AsRef<Path>, opts: Option<&ProcessOptions>) -> Result<Job> {
+    pub async fn upload(
+        &self,
+        path: impl AsRef<Path>,
+        opts: Option<&ProcessOptions>,
+    ) -> Result<Job> {
         let path = path.as_ref();
 
         // Validate the file exists and read it into memory.

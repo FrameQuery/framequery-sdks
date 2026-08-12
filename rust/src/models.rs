@@ -34,7 +34,11 @@ pub struct AudioTrack {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 
-    #[serde(default, rename = "downloadToken", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "downloadToken",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub download_token: Option<String>,
 
     #[serde(default, rename = "syncMode", skip_serializing_if = "Option::is_none")]
@@ -46,7 +50,11 @@ pub struct AudioTrack {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 
-    #[serde(default, rename = "perChannelTranscription", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "perChannelTranscription",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub per_channel_transcription: Option<bool>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]

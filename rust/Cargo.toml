@@ -1,9 +1,11 @@
 [package]
 name = "framequery"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Rust client for the FrameQuery API"
 license = "MIT"
+homepage = "https://framequery.com"
+documentation = "https://docs.rs/framequery"
 repository = "https://github.com/framequery/framequery-sdks"
 keywords = ["video", "processing", "api", "framequery"]
 categories = ["api-bindings", "multimedia::video"]
