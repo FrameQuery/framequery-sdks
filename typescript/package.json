@@ -39,7 +39,7 @@
   "homepage": "https://framequery.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/framequery/framequery-sdks",
+    "url": "git+https://github.com/framequery/framequery-sdks.git",
     "directory": "typescript"
   },
   "engines": {
